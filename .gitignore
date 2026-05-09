@@ -10,6 +10,8 @@ venv/
 *.log
 stderr*
 backend_v2/data/
+backend_v2/backend_log.txt
+backend_v2/server_log*.txt
 
 # Flutter / Dart
 .dart_tool/
