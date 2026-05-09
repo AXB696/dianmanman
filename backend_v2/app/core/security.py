@@ -8,12 +8,10 @@ from jose import JWTError, jwt
 import bcrypt
 from pydantic import BaseModel
 
-# ── 配置 ──────────────────────────────────────────────
-SECRET_KEY = "smart-charge-jwt-secret-key-change-in-production-2024"  # TODO: 放环境变量
-ALGORITHM = "HS256"
+from app.core.config import settings
 
-ACCESS_TOKEN_EXPIRE_DAYS = 7
-REFRESH_TOKEN_EXPIRE_DAYS = 30
+ALGORITHM = "HS256"
+JWT_SECRET = JWT_SECRET  # 模块加载时解析一次，避免每次调用都触发警告
 # ──────────────────────────────────────────────────────
 
 
@@ -38,7 +36,7 @@ def get_password_hash(password: str) -> str:
 
 
 def create_access_token(user_id: int, role: str = "user") -> str:
-    expire = datetime.utcnow() + timedelta(days=ACCESS_TOKEN_EXPIRE_DAYS)
+    expire = datetime.utcnow() + timedelta(days=settings.JWT_ACCESS_EXPIRE_DAYS)
     payload = {
         "sub": str(user_id),
         "role": role,
@@ -46,11 +44,11 @@ def create_access_token(user_id: int, role: str = "user") -> str:
         "exp": expire,
         "iat": datetime.utcnow(),
     }
-    return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
+    return jwt.encode(payload, JWT_SECRET, algorithm=ALGORITHM)
 
 
 def create_refresh_token(user_id: int, role: str = "user") -> str:
-    expire = datetime.utcnow() + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
+    expire = datetime.utcnow() + timedelta(days=settings.JWT_REFRESH_EXPIRE_DAYS)
     payload = {
         "sub": str(user_id),
         "role": role,
@@ -58,12 +56,12 @@ def create_refresh_token(user_id: int, role: str = "user") -> str:
         "exp": expire,
         "iat": datetime.utcnow(),
     }
-    return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
+    return jwt.encode(payload, JWT_SECRET, algorithm=ALGORITHM)
 
 
 def decode_token(token: str) -> Optional[TokenPayload]:
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[ALGORITHM])
         return TokenPayload(
             sub=payload.get("sub", ""),
             role=payload.get("role", "user"),

@@ -1,14 +1,24 @@
 import httpx
 import logging
-import os
 from typing import Optional
+
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
 
 class AMapService:
-    API_KEY = os.getenv("AMAP_KEY", "5595bdb2b42e61f60d48aec7166a207c")
     BASE_URL = "https://restapi.amap.com/v3"
+
+    @classmethod
+    def _get_api_key(cls) -> str:
+        key = settings.AMAP_KEY
+        if not key:
+            raise RuntimeError(
+                "AMAP_KEY 未配置！请在 .env 文件中设置 AMAP_KEY=你的高德Key，"
+                "或设置环境变量 AMAP_KEY。"
+            )
+        return key
 
     # 连接池复用（模块级单例，避免每次请求都新建 TCP 连接）
     _client: Optional[httpx.AsyncClient] = None
@@ -36,7 +46,7 @@ class AMapService:
         """
         url = f"{AMapService.BASE_URL}/place/around"
         params = {
-            "key": AMapService.API_KEY,
+            "key": AMapService._get_api_key(),
             "location": f"{lng},{lat}",
             "types": "050000|060000|080000|200300",
             "radius": radius,
@@ -73,7 +83,7 @@ class AMapService:
         """
         url = f"{AMapService.BASE_URL}/direction/driving"
         params = {
-            "key": AMapService.API_KEY,
+            "key": AMapService._get_api_key(),
             "origin": f"{o_lng},{o_lat}",
             "destination": f"{d_lng},{d_lat}",
             "strategy": 10,

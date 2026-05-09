@@ -4,17 +4,18 @@
 """
 import sqlite3
 import random
-import hashlib
 from datetime import datetime, timedelta
+
+import bcrypt
 
 DB = "data/smart_charge.db"
 
 conn = sqlite3.connect(DB)
 cur = conn.cursor()
 
-# ── 密码哈希 ──────────────────────────────────────────
+# ── 密码哈希（bcrypt，与 auth 登录模块保持一致）───────
 def hash_pw(pw: str) -> str:
-    return hashlib.sha256(pw.encode()).hexdigest()
+    return bcrypt.hashpw(pw.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
 # ── 随机日期（近30天内）───────────────────────────────
 now = datetime.utcnow()
