@@ -86,6 +86,11 @@ class VehicleRepository:
                 "微蓝7": {"battery": 68, "consumption": 15, "max_charge_power": 120, "battery_type": "三元锂"},
                 "凯迪拉克 LYRIQ": {"battery": 95.7, "consumption": 18, "max_charge_power": 150, "battery_type": "三元锂"},
             },
+            "小米": {
+                "SU7 Max": {"battery": 101, "consumption": 15.8, "max_charge_power": 350, "battery_type": "三元锂"},
+                "SU7 标准版": {"battery": 73.6, "consumption": 14.5, "max_charge_power": 200, "battery_type": "磷酸铁锂"},
+                "SU7 Pro": {"battery": 94.3, "consumption": 14.8, "max_charge_power": 250, "battery_type": "三元锂"},
+            },
             "华为问界": {
                 "问界 M5 EV": {"battery": 80, "consumption": 16, "max_charge_power": 120, "battery_type": "三元锂"},
                 "问界 M7": {"battery": 40, "consumption": 18, "max_charge_power": 60, "battery_type": "三元锂"},

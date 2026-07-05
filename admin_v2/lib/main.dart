@@ -16,12 +16,13 @@ class SmartChargeAdminApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: '电满满 管理后台',
+      title: '电满满 管理系统',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         brightness: Brightness.light,
         primaryColor: const Color(0xFF007AFF),
         colorScheme: const ColorScheme.light(primary: Color(0xFF007AFF)),
+        fontFamily: 'Noto Sans SC',
         useMaterial3: true,
       ),
       initialRoute: '/',
@@ -62,6 +63,10 @@ class _AuthGateState extends State<AuthGate> {
         _adminUser = user;
       }
     }
+    // token 刷新失败时强制退回登录页
+    client.onForceLogout = () {
+      if (mounted) setState(() { _loggedIn = false; _adminUser = null; });
+    };
     if (mounted) setState(() => _loading = false);
   }
 
@@ -70,6 +75,9 @@ class _AuthGateState extends State<AuthGate> {
     if (_loading) return const Scaffold(body: Center(child: CircularProgressIndicator()));
     if (!_loggedIn) return AdminLoginPage(onLogin: (user) {
       setState(() { _loggedIn = true; _adminUser = user; });
+      client.onForceLogout = () {
+        if (mounted) setState(() { _loggedIn = false; _adminUser = null; });
+      };
     });
     return AdminScaffold(user: _adminUser!, onLogout: () async {
       await client.clearTokens();
@@ -327,7 +335,7 @@ class _AdminLoginPageState extends State<AdminLoginPage> {
                 child: const Icon(Icons.admin_panel_settings, color: Colors.white, size: 32),
               ),
               const SizedBox(height: 20),
-              const Text('管理后台', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+              const Text('管理系统', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
               const SizedBox(height: 8),
               const Text('电满满 充电桩管理平台', style: TextStyle(color: Colors.grey)),
               const SizedBox(height: 32),

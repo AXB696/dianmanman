@@ -33,6 +33,7 @@ def list_history(
             id=h.id,
             user_id=h.user_id,
             station_id=h.station_id,
+            station_name=h.station_name or "",
             visited_at=h.visited_at.isoformat() if h.visited_at else None,
         )
         for h in history
@@ -45,7 +46,11 @@ def add_history(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    record = History(user_id=current_user.id, station_id=req.station_id)
+    record = History(
+        user_id=current_user.id,
+        station_id=req.station_id,
+        station_name=req.station_name or "",
+    )
     db.add(record)
     db.commit()
     db.refresh(record)
@@ -53,6 +58,7 @@ def add_history(
         id=record.id,
         user_id=record.user_id,
         station_id=record.station_id,
+        station_name=record.station_name or "",
         visited_at=record.visited_at.isoformat() if record.visited_at else None,
     )
 

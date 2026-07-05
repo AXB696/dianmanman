@@ -67,12 +67,45 @@ async def get_stations(
     })
 
 @router.get("/station/{station_id}", response_model=BaseResponse)
-async def get_station_detail(station_id: str):
+async def get_station_detail(
+    station_id: str,
+    lat: Optional[float] = Query(None, description="用户纬度（可选，传入后自动计算距离）"),
+    lng: Optional[float] = Query(None, description="用户经度（可选，传入后自动计算距离）"),
+):
+    """获取单个电站详情，可选传入用户位置以计算距离和预估信息"""
     station = station_repo.get_by_id(station_id)
     if not station:
         from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="Station Not Found")
-    return BaseResponse(data=station)
+
+    # 构造详情页所需的完整数据
+    s_lat = station["location"]["lat"]
+    s_lng = station["location"]["lng"]
+
+    # 如果传入了用户坐标，计算距离和预估路线信息
+    if lat is not None and lng is not None:
+        distance = station_repo.haversine_distance(lat, lng, s_lat, s_lng)
+        road_distance = distance * 1.35  # 道路系数
+        duration = max(int(road_distance / 35 * 60), 1)  # 预计驾驶分钟数
+    else:
+        road_distance = 0
+        duration = 0
+
+    # 构造与推荐接口兼容的响应（方便 app 端 StationDetailScreen 直接使用）
+    return BaseResponse(data={
+        "station": station,
+        "distance": round(road_distance, 2),
+        "duration": duration,
+        "estimated_charging_time": 40,   # 默认值，app 端可根据车型自行估算
+        "estimated_cost": 30.5,           # 默认值，app 端可根据电价和电量自行估算
+        "reachable": True,
+        "route": {
+            "distance": round(road_distance, 2),
+            "duration": duration,
+            "path": [],
+            "method": "haversine_mock" if (lat is not None and lng is not None) else "none",
+        },
+    })
 
 
 # ── Admin: 电站总览列表（支持筛选/搜索/排序/分页）───────────

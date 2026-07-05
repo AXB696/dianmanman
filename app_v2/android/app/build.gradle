@@ -41,9 +41,9 @@ android {
             // TODO: Add your own signing config for the release build.
             // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.debug
-            minifyEnabled true
-            shrinkResources true
-            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            minifyEnabled false
+            shrinkResources false
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
     }
 }
@@ -52,12 +52,11 @@ flutter {
     source = "../.."
 }
 
-// 高德地图SDK由Flutter插件自动引入
-// 如果编译失败，请取消下面的注释
-// dependencies {
-//     implementation 'com.amap.api:3dmap:8.1.0'
-//     implementation 'com.amap.api:location:5.6.0'
-// }
+// 高德地图 SDK 显式依赖（MainActivity 需要在编译时引用 AMapLocationClient）
+dependencies {
+    implementation 'com.amap.api:3dmap:8.1.0'
+    implementation 'com.amap.api:location:5.6.0'
+}
 
 configurations.all {
     resolutionStrategy {

@@ -21,11 +21,15 @@
         android:usesCleartextTraffic="true"
         android:networkSecurityConfig="@xml/network_security_config">
 
-        <!-- 高德地图 Key -->
+        <!-- 高德新版统一 Key（会覆盖地图和定位的旧版 Key） -->
+        <meta-data
+            android:name="com.amap.api.v2.apikey"
+            android:value="89feee20b4ad911ee8e1effc2a13bfd3"/>
+        <!-- 高德地图 Key（兼容旧版） -->
         <meta-data
             android:name="com.amap.api.maps.key"
             android:value="89feee20b4ad911ee8e1effc2a13bfd3"/>
-        <!-- 高德定位 Key -->
+        <!-- 高德定位 Key（兼容旧版） -->
         <meta-data
             android:name="com.amap.api.location.key"
             android:value="89feee20b4ad911ee8e1effc2a13bfd3"/>

@@ -35,8 +35,10 @@ def init_db():
     # 导入模型以触发 Base.metadata 注册
     from app.models import user, vehicle, favorite, history, announcement  # noqa: F401
     Base.metadata.create_all(bind=engine)
-    # 迁移：确保 last_login_at 列存在于 users 表（已有表不会自动 ALTER）
+    # 迁移
     _migrate_users_table()
+    _migrate_history_table()
+    _migrate_announcements_table()
 
 
 def _migrate_users_table():
@@ -48,6 +50,34 @@ def _migrate_users_table():
             columns = [row[1] for row in result.fetchall()]
             if "last_login_at" not in columns:
                 conn.execute(text("ALTER TABLE users ADD COLUMN last_login_at DATETIME"))
+                conn.commit()
+    except Exception:
+        pass
+
+
+def _migrate_history_table():
+    """迁移：为 history 表添加 station_name 列（若不存在）"""
+    from sqlalchemy import text
+    try:
+        with engine.connect() as conn:
+            result = conn.execute(text("PRAGMA table_info(history)"))
+            columns = [row[1] for row in result.fetchall()]
+            if "station_name" not in columns:
+                conn.execute(text("ALTER TABLE history ADD COLUMN station_name VARCHAR(200) DEFAULT ''"))
+                conn.commit()
+    except Exception:
+        pass
+
+
+def _migrate_announcements_table():
+    """迁移：为 announcements 表添加 display_until 列（若不存在）"""
+    from sqlalchemy import text
+    try:
+        with engine.connect() as conn:
+            result = conn.execute(text("PRAGMA table_info(announcements)"))
+            columns = [row[1] for row in result.fetchall()]
+            if "display_until" not in columns:
+                conn.execute(text("ALTER TABLE announcements ADD COLUMN display_until DATETIME"))
                 conn.commit()
     except Exception:
         pass

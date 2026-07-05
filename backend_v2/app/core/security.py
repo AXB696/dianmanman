@@ -11,7 +11,7 @@ from pydantic import BaseModel
 from app.core.config import settings
 
 ALGORITHM = "HS256"
-JWT_SECRET = JWT_SECRET  # 模块加载时解析一次，避免每次调用都触发警告
+JWT_SECRET = settings.get_jwt_secret()  # 模块加载时解析一次，避免每次调用都触发警告
 # ──────────────────────────────────────────────────────
 
 

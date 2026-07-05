@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel
 
 from app.core.database import get_db
-from app.core.dependencies import get_current_user, get_current_admin
+from app.core.dependencies import get_current_admin
 from app.models.announcement import Announcement
 from app.models.user import User
 from app.schemas.announcement import (
@@ -59,6 +59,7 @@ def create_announcement(
         title=req.title,
         content=req.content,
         status=req.status or "draft",
+        display_until=req.display_until,
     )
     db.add(ann)
     db.commit()
@@ -82,6 +83,8 @@ def update_announcement(
         ann.content = req.content
     if req.status is not None:
         ann.status = req.status
+    if req.display_until is not None:
+        ann.display_until = req.display_until
     db.commit()
     db.refresh(ann)
     return _to_resp(ann)
@@ -105,10 +108,31 @@ def delete_announcement(
 
 @public_router.get("/announcements/latest")
 def latest_announcements(
-    _: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """App端获取最近7天内已发布的公告（需登录）"""
+    """App端获取当前有效的弹窗公告（公开，无需登录）
+    筛选条件：status=published 且 display_until > 当前时间"""
+    now = datetime.utcnow()
+    items = (
+        db.query(Announcement)
+        .filter(
+            Announcement.status == "published",
+            Announcement.display_until > now,
+        )
+        .order_by(Announcement.created_at.desc())
+        .limit(5)
+        .all()
+    )
+    return {
+        "announcements": [_to_resp(a) for a in items],
+    }
+
+# 兼容旧接口：滚动公告
+@public_router.get("/announcements/scroll")
+def scroll_announcements(
+    db: Session = Depends(get_db),
+):
+    """App端获取最近7天已发布公告用于顶部滚动条（公开）"""
     cutoff = datetime.utcnow() - timedelta(days=7)
     items = (
         db.query(Announcement)
@@ -131,6 +155,7 @@ def _to_resp(a: Announcement) -> AnnouncementResponse:
         title=a.title,
         content=a.content,
         status=a.status,
+        display_until=a.display_until.isoformat() if a.display_until else None,
         created_at=a.created_at.isoformat() if a.created_at else None,
         updated_at=a.updated_at.isoformat() if a.updated_at else None,
     )

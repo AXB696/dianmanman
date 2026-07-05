@@ -54,7 +54,7 @@ class _DashboardPageState extends State<DashboardPage> {
       setState(() {
         _stats = results[0] as Map<String, dynamic>?;
         _overview = results[1] as Map<String, dynamic>?;
-        _users = (results[2] as List<dynamic>?) ?? [];
+        _users = (results[2] as Map<String, dynamic>?)?['users'] as List<dynamic>? ?? [];
         _totalUsers = results[3] as int;
         _dailyUsers = results[4] as Map<String, dynamic>?;
         _chargingByHour = results[5] as Map<String, dynamic>?;
@@ -279,13 +279,17 @@ class _DashboardPageState extends State<DashboardPage> {
       return _emptyChart('暂无用户增长数据');
     }
 
-    final maxY = (counts.map((c) => (c as num).toDouble()).reduce((a, b) => a > b ? a : b) * 1.4).clamp(1.0, double.infinity);
-    final step = (dates.length / 10).ceil().clamp(1, dates.length);
+    final maxCount = counts.map((c) => (c as num).toDouble()).reduce((a, b) => a > b ? a : b);
+    final maxY = (maxCount * 1.4).clamp(1.0, double.infinity);
 
+    // 所有数据点都显示，确保最后一天不会被跳过
     final spots = <FlSpot>[];
-    for (int i = 0; i < counts.length; i += step) {
+    for (int i = 0; i < counts.length; i++) {
       spots.add(FlSpot(i.toDouble(), (counts[i] as num).toDouble()));
     }
+
+    // X轴标签采样（最多显示10个日期标签）
+    final labelStep = (dates.length / 10).ceil().clamp(1, dates.length);
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -322,7 +326,7 @@ class _DashboardPageState extends State<DashboardPage> {
               sideTitles: SideTitles(
                 showTitles: true,
                 reservedSize: 30,
-                interval: step.toDouble(),
+                interval: labelStep.toDouble(),
                 getTitlesWidget: (v, _) {
                   final idx = v.toInt();
                   if (idx < 0 || idx >= dates.length) return const SizedBox();

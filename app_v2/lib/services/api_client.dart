@@ -89,7 +89,7 @@ class ApiClient {
 
   // ── Announcements ─────────────────────────────────
   Future<Response> getLatestAnnouncements() {
-    return get('/announcements/latest');
+    return get('/api/announcements/latest');
   }
 
   // ── Internal: Token Refresh ───────────────────────

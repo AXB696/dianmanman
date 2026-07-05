@@ -46,6 +46,7 @@ class _RegisterPageState extends State<RegisterPage> {
         nickname: _nicknameCtrl.text.trim(),
       );
       if (user != null && mounted) {
+        Navigator.pop(context); // 注册成功，关闭注册页
         widget.onRegisterSuccess();
       } else if (mounted) {
         setState(() { _loading = false; _error = '注册失败，用户名可能已被占用'; });
@@ -82,7 +83,7 @@ class _RegisterPageState extends State<RegisterPage> {
                   style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Color(0xFF1A1A2E)),
                 ),
                 const SizedBox(height: 8),
-                const Text('创建账户开始使用 Smart Charge', style: TextStyle(fontSize: 14, color: Colors.grey)),
+                const Text('创建账户开始使用 电满满', style: TextStyle(fontSize: 14, color: Colors.grey)),
                 const SizedBox(height: 40),
 
                 Container(

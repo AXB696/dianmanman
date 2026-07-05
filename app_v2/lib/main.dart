@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'services/api_client.dart';
+import 'services/data_repository.dart';
 import 'home.dart';
 
 void main() {
@@ -18,7 +19,7 @@ class SmartChargeV2App extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Smart Charge V2',
+      title: '电满满 V2',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         brightness: Brightness.light,
@@ -46,6 +47,7 @@ class AuthBootWrapper extends StatefulWidget {
 
 class _AuthBootWrapperState extends State<AuthBootWrapper> {
   bool _loading = true;
+  int _refreshKey = 0; // 登录/登出后强制重建主页，刷新数据源
 
   @override
   void initState() {
@@ -54,14 +56,18 @@ class _AuthBootWrapperState extends State<AuthBootWrapper> {
   }
 
   Future<void> _init() async {
+    // 1. 初始化 API 客户端（服务器地址）
     final client = ApiClient();
-    // 初始化 server URL
     final savedUrl = await client.getServerUrl();
     if (savedUrl != null) {
       await client.init(savedUrl);
     } else {
       await client.saveServerUrl('https://3aa33e7d.cpolar.io');
     }
+
+    // 2. 初始化数据仓库（检测登录状态）
+    await DataRepository().init();
+
     if (mounted) setState(() => _loading = false);
   }
 
@@ -76,7 +82,11 @@ class _AuthBootWrapperState extends State<AuthBootWrapper> {
             children: [
               Icon(Icons.ev_station, size: 64, color: Color(0xFF007AFF)),
               SizedBox(height: 20),
-              Text('Smart Charge', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Color(0xFF1A1A2E))),
+              Text('电满满',
+                  style: TextStyle(
+                      fontSize: 24,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFF1A1A2E))),
               SizedBox(height: 16),
               CircularProgressIndicator(color: Color(0xFF007AFF)),
             ],
@@ -84,7 +94,15 @@ class _AuthBootWrapperState extends State<AuthBootWrapper> {
         ),
       );
     }
-    // 直接进入主页，登录功能在个人中心按需使用
-    return SleekHomeWrapper(onLogout: () {});
+
+    // 无论游客还是登录用户，都进入主页
+    // ValueKey 确保登录/登出后主页完全重建，重新从正确的数据源加载
+    return SleekHomeWrapper(
+      key: ValueKey(_refreshKey),
+      onLogout: () {
+        // 登出或登录状态变化时，强制重建主页
+        setState(() => _refreshKey++);
+      },
+    );
   }
 }

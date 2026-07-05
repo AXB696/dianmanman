@@ -1,5 +1,4 @@
 import 'dart:ui' as ui;
-import 'dart:typed_data';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:async';
@@ -12,18 +11,25 @@ import 'package:geolocator/geolocator.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter_compass/flutter_compass.dart';
+import 'package:amap_flutter_location/amap_flutter_location.dart';
+import 'package:amap_flutter_location/amap_location_option.dart';
 import 'services/api_client.dart';
-import 'pages/profile_page.dart';
+import 'services/data_repository.dart';
+import 'services/local_storage.dart';
+import 'services/auth_service.dart';
+import 'services/vehicle_data.dart';
+
+import 'pages/login_page.dart';
 
 // ============== 全局常量 ==============
 const String AMAP_KEY = "89feee20b4ad911ee8e1effc2a13bfd3";
 const double _OFF_ROUTE_THRESHOLD_METERS = 50.0; // 偏航阈值：50米
-const double _ARRIVAL_DISTANCE_METERS = 100.0;    // 到达判定距离
-const double _GPS_ACCURACY_THRESHOLD = 25.0;     // GPS精度过滤阈值
-const double _ARRIVAL_SPEED_THRESHOLD = 5.0;      // 到达时最大速度 km/h
-const int _ARRIVAL_CONFIRM_SECONDS = 3;           // 到达需持续多少秒
+const double _ARRIVAL_DISTANCE_METERS = 100.0; // 到达判定距离
+const double _GPS_ACCURACY_THRESHOLD = 25.0; // GPS精度过滤阈值
+const double _ARRIVAL_SPEED_THRESHOLD = 5.0; // 到达时最大速度 km/h
+const int _ARRIVAL_CONFIRM_SECONDS = 3; // 到达需持续多少秒
 
-// ============== 错误重试卡片 ==============
+// ============== 错误重试卡片（与充电站卡片等大，填满 160px） ==============
 class _ErrorRetryCard extends StatelessWidget {
   final String errorMsg;
   final VoidCallback onRetry;
@@ -32,43 +38,55 @@ class _ErrorRetryCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: Container(
-        margin: const EdgeInsets.symmetric(horizontal: 32),
-        padding: const EdgeInsets.all(24),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(20),
-          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.08), blurRadius: 16)],
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.signal_wifi_off, size: 40, color: Colors.red.shade400),
-            const SizedBox(height: 12),
-            const Text('加载失败', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 8),
-            Text(errorMsg, style: TextStyle(fontSize: 12, color: Colors.grey.shade600), textAlign: TextAlign.center, maxLines: 2, overflow: TextOverflow.ellipsis),
-            const SizedBox(height: 16),
-            ElevatedButton.icon(
-              onPressed: onRetry,
-              icon: const Icon(Icons.refresh, size: 18),
-              label: const Text('重新加载'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF007AFF),
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-              ),
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 8),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(24),
+        boxShadow: [
+          BoxShadow(
+              color: Colors.black.withOpacity(0.08),
+              blurRadius: 24,
+              spreadRadius: 2,
+              offset: const Offset(0, 10)),
+        ],
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Spacer(),
+          Icon(Icons.signal_wifi_off, size: 24, color: Colors.red.shade400),
+          const SizedBox(height: 6),
+          const Text('定位失败',
+              style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 2),
+          Text(errorMsg,
+              style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+              textAlign: TextAlign.center,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis),
+          const SizedBox(height: 8),
+          ElevatedButton.icon(
+            onPressed: onRetry,
+            icon: const Icon(Icons.refresh, size: 16),
+            label: const Text('重新加载', style: TextStyle(fontSize: 13)),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF007AFF),
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(18)),
             ),
-          ],
-        ),
+          ),
+          const Spacer(),
+        ],
       ),
     );
   }
 }
 
-// ============== 无电站空状态卡片 ==============
+// ============== 无电站空状态卡片（与充电站卡片等大） ==============
 class _EmptyStationsCard extends StatelessWidget {
   final VoidCallback onRetry;
 
@@ -76,36 +94,46 @@ class _EmptyStationsCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: Container(
-        margin: const EdgeInsets.symmetric(horizontal: 32),
-        padding: const EdgeInsets.all(24),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(20),
-          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.08), blurRadius: 16)],
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.ev_station_outlined, size: 48, color: Colors.grey.shade400),
-            const SizedBox(height: 12),
-            const Text('附近无可用充电站', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 8),
-            Text('请检查网络或稍后重试', style: TextStyle(fontSize: 13, color: Colors.grey.shade500)),
-            const SizedBox(height: 16),
-            OutlinedButton.icon(
-              onPressed: onRetry,
-              icon: const Icon(Icons.refresh, size: 18),
-              label: const Text('刷新'),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: const Color(0xFF007AFF),
-                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-              ),
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 8),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(24),
+        boxShadow: [
+          BoxShadow(
+              color: Colors.black.withOpacity(0.08),
+              blurRadius: 24,
+              spreadRadius: 2,
+              offset: const Offset(0, 10)),
+        ],
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Spacer(),
+          Icon(Icons.ev_station_outlined,
+              size: 24, color: Colors.grey.shade400),
+          const SizedBox(height: 6),
+          const Text('附近无可用充电站',
+              style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 2),
+          Text('请检查网络或稍后重试',
+              style: TextStyle(fontSize: 11, color: Colors.grey.shade500)),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            onPressed: onRetry,
+            icon: const Icon(Icons.refresh, size: 16),
+            label: const Text('刷新', style: TextStyle(fontSize: 13)),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: const Color(0xFF007AFF),
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(18)),
             ),
-          ],
-        ),
+          ),
+          const Spacer(),
+        ],
       ),
     );
   }
@@ -147,11 +175,10 @@ class GlassmorphicContainer extends StatelessWidget {
             ),
             boxShadow: [
               BoxShadow(
-                color: Colors.blueGrey.withOpacity(0.12), // 加深下层投影，形成悬空感
-                blurRadius: 20,
-                spreadRadius: 5,
-                offset: const Offset(0, 8)
-              ),
+                  color: Colors.blueGrey.withOpacity(0.12), // 加深下层投影，形成悬空感
+                  blurRadius: 20,
+                  spreadRadius: 5,
+                  offset: const Offset(0, 8)),
             ],
           ),
           child: child,
@@ -175,7 +202,7 @@ class _SleekHomeWrapperState extends State<SleekHomeWrapper> {
   List<dynamic> _recommendations = [];
   bool _isLoading = true;
   String _errorMsg = "";
-  
+
   Set<Marker> _markers = {};
   Map<String, int> _markerIdToIndex = {}; // markerId → 电站索引
   AMapController? _mapController;
@@ -191,21 +218,28 @@ class _SleekHomeWrapperState extends State<SleekHomeWrapper> {
     final ByteData bytes72 = await rootBundle.load('assets/station_icon.png');
     _stationIcon = BitmapDescriptor.fromBytes(bytes72.buffer.asUint8List());
 
-    final ByteData bytes80 = await rootBundle.load('assets/station_icon_sel.png');
-    _stationIconSelected = BitmapDescriptor.fromBytes(bytes80.buffer.asUint8List());
+    final ByteData bytes80 =
+        await rootBundle.load('assets/station_icon_sel.png');
+    _stationIconSelected =
+        BitmapDescriptor.fromBytes(bytes80.buffer.asUint8List());
   }
-  // 动态车型和电量状态
-  String _currentCar = "Model Y";
+
+  // 动态车型和电量状态（默认值：特斯拉 Model Y 标准续航）
+  String _currentBrand = "特斯拉";
+  String _currentCar = "Model Y 标准续航";
   double _batteryCapacity = 60.0;
-  double _energyConsumption = 14.5;
+  double _energyConsumption = 14.0;
   double _currentSoc = 48.0;
 
   // 物理真机动态定位GPS锚点 (预设武汉兜底)
   double _userLat = 30.583547;
   double _userLng = 114.253265;
 
-  // 服务器地址（可配置）
-  String _serverUrl = "https://3aa33e7d.cpolar.io";
+  // 无道路吸附的精准定位缓存（用于推荐请求，避免被地图道路吸附干扰）
+  double? _accurateLat;
+  double? _accurateLng;
+  DateTime? _accurateTime;
+  static const Duration _accurateCacheTTL = Duration(seconds: 30);
 
   // 天气状态
   int _temperature = 0;
@@ -217,24 +251,49 @@ class _SleekHomeWrapperState extends State<SleekHomeWrapper> {
   // 收藏状态
   Set<String> _favorites = {};
   bool _isFavorite(String stationId) => _favorites.contains(stationId);
-  String _getStationId(dynamic station) => station['station_id']?.toString() ?? station['name']?.toString() ?? '';
+  String _getStationId(dynamic station) =>
+      station['station_id']?.toString() ?? station['name']?.toString() ?? '';
   String _weatherIcon = '-';
 
-  // 公告状态
+  // 公告状态（仅用于弹窗）
   List<dynamic> _announcements = [];
-  final PageController _announcementController = PageController();
-  int _currentAnnouncementPage = 0;
 
   @override
   void initState() {
     super.initState();
-    _loadServerUrl();
-    _loadFavorites();
-    _loadHistory();
+    // 高德定位 SDK 初始化（隐私合规必须最先执行）
+    AMapFlutterLocation.setApiKey(AMAP_KEY, AMAP_KEY);
+    AMapFlutterLocation.updatePrivacyShow(true, true);
+    AMapFlutterLocation.updatePrivacyAgree(true);
+    _initData();
     _fetchWeather();
     _generateStationIcons();
     _loadUserIcon();
     _startCompass();
+  }
+
+  /// 初始化数据：加载车型设置、收藏、历史，然后拉取推荐
+  Future<void> _initData() async {
+    // 加载本地车型设置（始终从本地读取）
+    final carSettings = await DataRepository().loadCarSettings();
+    // 加载收藏和历史（自动根据登录状态选择数据源）
+    final favs = await DataRepository().loadFavorites();
+    final history = await DataRepository().loadHistory();
+
+    if (mounted) {
+      setState(() {
+        _currentBrand = carSettings['brand']?.toString() ?? '特斯拉';
+        _currentCar = carSettings['car_name']?.toString() ?? 'Model Y 标准续航';
+        _batteryCapacity =
+            (carSettings['battery_capacity'] ?? 60.0).toDouble();
+        _energyConsumption =
+            (carSettings['energy_consumption'] ?? 14.0).toDouble();
+        _currentSoc = (carSettings['current_soc'] ?? 48.0).toDouble();
+        _favorites = favs;
+        _history = history.cast<dynamic>();
+      });
+    }
+    // 加载推荐和公告
     _fetchRealData();
     _fetchAnnouncements();
   }
@@ -279,54 +338,184 @@ class _SleekHomeWrapperState extends State<SleekHomeWrapper> {
     try {
       final resp = await ApiClient().getLatestAnnouncements();
       if (resp.statusCode == 200 && resp.data['announcements'] != null) {
+        final list = resp.data['announcements'] as List;
         if (mounted) {
-          setState(() => _announcements = resp.data['announcements'] as List);
+          setState(() => _announcements = list);
         }
+        // 弹窗公告：检查是否有未读的
+        _checkPopupAnnouncements(list);
       }
     } catch (_) {
       // 公告获取失败不影响主流程
     }
   }
 
-  void _showAnnouncementDetail(Map<String, dynamic> ann) {
+  /// 检查并展示弹窗公告
+  void _checkPopupAnnouncements(List<dynamic> announcements) async {
+    if (announcements.isEmpty) return;
+
+    final prefs = await SharedPreferences.getInstance();
+    final readIds = prefs.getStringList('read_announcements') ?? [];
+
+    // 找出未读的公告
+    final unread = announcements.where((a) {
+      final id = a['id']?.toString() ?? '';
+      return !readIds.contains(id);
+    }).toList();
+
+    if (unread.isEmpty) return;
+
+    // 显示弹窗
+    if (mounted) _showPopupDialog(unread);
+  }
+
+  /// 弹窗公告对话框（玻璃拟态风格）
+  void _showPopupDialog(List<dynamic> announcements) {
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(ann['title'] ?? '公告'),
-        content: SizedBox(
-          width: 320,
+      barrierDismissible: false,
+      builder: (ctx) => Dialog(
+        backgroundColor: Colors.transparent,
+        insetPadding: const EdgeInsets.all(24),
+        child: Container(
+          constraints: const BoxConstraints(maxWidth: 360),
+          decoration: BoxDecoration(
+            color: Colors.white.withOpacity(0.95),
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(color: Colors.white, width: 1.5),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.blueGrey.withOpacity(0.15),
+                blurRadius: 30,
+                spreadRadius: 5,
+                offset: const Offset(0, 10),
+              ),
+            ],
+          ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // 顶部标题栏
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                decoration: BoxDecoration(
-                  color: (ann['status'] == 'published' ? Colors.green : Colors.orange).shade50,
-                  borderRadius: BorderRadius.circular(6),
+                padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
+                decoration: const BoxDecoration(
+                  border: Border(
+                    bottom: BorderSide(color: Color(0xFFEEEEEE), width: 0.5),
+                  ),
                 ),
-                child: Text(
-                  ann['status'] == 'published' ? '已发布' : '草稿',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: ann['status'] == 'published' ? Colors.green.shade700 : Colors.orange.shade700,
-                    fontWeight: FontWeight.bold,
+                child: Row(
+                  children: [
+                    Container(
+                      width: 40,
+                      height: 40,
+                      decoration: BoxDecoration(
+                        gradient: const LinearGradient(
+                          colors: [Color(0xFF007AFF), Color(0xFF5856D6)],
+                        ),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: const Icon(Icons.campaign,
+                          color: Colors.white, size: 22),
+                    ),
+                    const SizedBox(width: 12),
+                    const Expanded(
+                      child: Text('系统公告',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                            color: Color(0xFF1A1A2E),
+                          )),
+                    ),
+                    const SizedBox(width: 8),
+                    if (announcements.length > 1)
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF007AFF).withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Text('${announcements.length}条',
+                            style: const TextStyle(
+                              fontSize: 11,
+                              color: Color(0xFF007AFF),
+                              fontWeight: FontWeight.bold,
+                            )),
+                      ),
+                  ],
+                ),
+              ),
+              // 公告内容
+              Flexible(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.all(20),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: announcements.map((a) {
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 16),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(a['title'] ?? '',
+                                style: const TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.bold,
+                                  color: Color(0xFF007AFF),
+                                )),
+                            const SizedBox(height: 6),
+                            Text(a['content'] ?? '',
+                                style: const TextStyle(
+                                  fontSize: 14,
+                                  color: Colors.black87,
+                                  height: 1.5,
+                                )),
+                          ],
+                        ),
+                      );
+                    }).toList(),
                   ),
                 ),
               ),
-              const SizedBox(height: 8),
-              Text(ann['content'] ?? '', style: const TextStyle(fontSize: 14)),
-              const SizedBox(height: 8),
-              Text(
-                ann['created_at']?.toString().substring(0, 19) ?? '',
-                style: const TextStyle(fontSize: 12, color: Colors.grey),
+              // 底部按钮
+              Container(
+                padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+                child: SizedBox(
+                  width: double.infinity,
+                  height: 48,
+                  child: ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF007AFF),
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16)),
+                      elevation: 0,
+                    ),
+                    onPressed: () async {
+                      // 标记所有为已读
+                      final prefs =
+                          await SharedPreferences.getInstance();
+                      final readIds = prefs.getStringList(
+                              'read_announcements') ??
+                          [];
+                      for (final a in announcements) {
+                        final id = a['id']?.toString() ?? '';
+                        if (!readIds.contains(id)) readIds.add(id);
+                      }
+                      await prefs.setStringList(
+                          'read_announcements', readIds);
+                      Navigator.pop(ctx);
+                    },
+                    child: const Text('我知道了',
+                        style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold)),
+                  ),
+                ),
               ),
             ],
           ),
         ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('关闭')),
-        ],
       ),
     );
   }
@@ -345,45 +534,13 @@ class _SleekHomeWrapperState extends State<SleekHomeWrapper> {
     return '❓';
   }
 
-  Future<void> _loadServerUrl() async {
-    final prefs = await SharedPreferences.getInstance();
-    final saved = prefs.getString('server_url');
-    if (saved != null && saved.isNotEmpty) {
-      setState(() => _serverUrl = saved);
-    }
-  }
-
-  Future<void> _saveServerUrl(String url) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('server_url', url);
-    setState(() => _serverUrl = url);
-  }
-
-  Future<void> _loadFavorites() async {
-    final prefs = await SharedPreferences.getInstance();
-    final list = prefs.getStringList('favorites') ?? [];
-    setState(() => _favorites = list.toSet());
-  }
-
+  /// 切换收藏状态（通过数据仓库，登录用户同步到云端）
   Future<void> _toggleFavorite(String stationId) async {
-    final prefs = await SharedPreferences.getInstance();
-    final list = prefs.getStringList('favorites') ?? [];
-    final set = list.toSet();
-    if (set.contains(stationId)) {
-      set.remove(stationId);
-    } else {
-      set.add(stationId);
-    }
-    await prefs.setStringList('favorites', set.toList());
-    setState(() => _favorites = set);
+    final favs = await DataRepository().toggleFavorite(stationId);
+    if (mounted) setState(() => _favorites = favs);
   }
 
-  Future<void> _loadHistory() async {
-    final prefs = await SharedPreferences.getInstance();
-    final list = prefs.getStringList('history') ?? [];
-    setState(() => _history = jsonDecode(list.join()).cast<Map<String, dynamic>>());
-  }
-
+  /// 添加历史记录（通过数据仓库，登录用户同步到云端）
   Future<void> _addHistory(dynamic data) async {
     final station = data['station'] ?? {};
     final stationId = _getStationId(station);
@@ -392,60 +549,167 @@ class _SleekHomeWrapperState extends State<SleekHomeWrapper> {
       'station': station,
       'visited_at': DateTime.now().toIso8601String(),
     };
-    final prefs = await SharedPreferences.getInstance();
-    final list = prefs.getStringList('history') ?? [];
-    final history = jsonDecode(list.join()).cast<Map<String, dynamic>>();
-
-    // 去重：移除同 station_id 的旧记录
-    history.removeWhere((e) => e['station_id'] == stationId);
-    // 插入到最前
-    history.insert(0, entry);
-    // 最多保留 50 条
-    if (history.length > 50) history.removeRange(50, history.length);
-
-    await prefs.setStringList('history', [jsonEncode(history)]);
-    setState(() => _history = history);
+    await DataRepository().addHistory(entry);
+    // 重新加载以保持 UI 同步
+    final history = await DataRepository().loadHistory();
+    if (mounted) setState(() => _history = history.cast<dynamic>());
   }
 
-  Future<Position?> _determinePosition() async {
-    bool serviceEnabled;
-    LocationPermission permission;
-    serviceEnabled = await Geolocator.isLocationServiceEnabled();
-    if (!serviceEnabled) return null;
-    permission = await Geolocator.checkPermission();
-    if (permission == LocationPermission.denied) {
-      permission = await Geolocator.requestPermission();
-      if (permission == LocationPermission.denied) return null;
-    }
-    if (permission == LocationPermission.deniedForever) return null;
-    
-    try {
-      // 解决室内获取不到 GPS 卫星信号导致的一直转圈死锁
-      return await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.high,
-        timeLimit: const Duration(seconds: 5)
+  /// 高德定位优先，geolocator 兜底
+  /// 始终使用 Device_Sensors 模式（纯GPS，无道路吸附），用于获取真实位置
+  Future<Position?> _determinePosition({bool useCache = true}) async {
+    // 如果缓存中有 30 秒内的精准定位，直接复用（避免频繁等待定位）
+    if (useCache &&
+        _accurateLat != null &&
+        _accurateLng != null &&
+        _accurateTime != null &&
+        DateTime.now().difference(_accurateTime!) < _accurateCacheTTL) {
+      return Position(
+        latitude: _accurateLat!,
+        longitude: _accurateLng!,
+        timestamp: _accurateTime ?? DateTime.now(),
+        accuracy: 0,
+        altitude: 0,
+        heading: 0,
+        speed: 0,
+        speedAccuracy: 0,
+        altitudeAccuracy: 0,
+        headingAccuracy: 0,
       );
-    } catch (e) {
-      // 超时则秒切基站/WiFi历史定位
-      return await Geolocator.getLastKnownPosition();
     }
+
+    // 1. 先尝试高德定位 SDK，Device_Sensors 模式 = 纯GPS无道路吸附
+    try {
+      final aMapPos = await _getAMapPosition();
+      if (aMapPos != null) {
+        // 缓存无道路吸附的精准坐标
+        _accurateLat = aMapPos.latitude;
+        _accurateLng = aMapPos.longitude;
+        _accurateTime = DateTime.now();
+        return aMapPos;
+      }
+    } catch (e) {
+      debugPrint('高德定位失败: $e');
+    }
+
+    // 2. 高德失败，回退到 geolocator（也无道路吸附）
+    try {
+      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        _errorMsg = '定位失败：请打开手机定位服务';
+        return null;
+      }
+      final pos = await Geolocator.getCurrentPosition(
+        locationSettings: AndroidSettings(
+          accuracy: LocationAccuracy.high,
+          timeLimit: const Duration(seconds: 15),
+          forceLocationManager: true,
+        ),
+      );
+      // 缓存精准坐标
+      _accurateLat = pos.latitude;
+      _accurateLng = pos.longitude;
+      _accurateTime = DateTime.now();
+      return pos;
+    } catch (e) {
+      debugPrint('geolocator 定位异常: $e');
+      try {
+        final lastPos = await Geolocator.getLastKnownPosition();
+        if (lastPos != null) {
+          _accurateLat = lastPos.latitude;
+          _accurateLng = lastPos.longitude;
+          _accurateTime = DateTime.now();
+          return lastPos;
+        }
+      } catch (_) {}
+      _errorMsg = '定位失败：定位超时，请到室外再试';
+      return null;
+    }
+  }
+
+  /// 使用高德定位 SDK 获取位置（和手机高德 App 同一引擎）
+  Future<Position?> _getAMapPosition() async {
+    final location = AMapFlutterLocation();
+    location.setLocationOption(AMapLocationOption(
+      onceLocation: true,
+      locationMode: AMapLocationMode.Device_Sensors,
+      needAddress: false,
+    ));
+
+    final completer = Completer<Position?>();
+    StreamSubscription? sub;
+
+    sub = location.onLocationChanged().listen((result) {
+      final errCode = result['errorCode']?.toString();
+      if (errCode != null && errCode != '0') {
+        debugPrint('高德定位错误: $errCode ${result['errorInfo']}');
+        if (!completer.isCompleted) completer.complete(null);
+      } else if (result['latitude'] != null) {
+        final lat = (result['latitude'] as num).toDouble();
+        final lng = (result['longitude'] as num).toDouble();
+        // 过滤无效坐标
+        if (lat.abs() > 0.01 && lng.abs() > 0.01 && !completer.isCompleted) {
+          completer.complete(Position(
+            latitude: lat,
+            longitude: lng,
+            timestamp: DateTime.now(),
+            accuracy: (result['accuracy'] as num?)?.toDouble() ?? 0,
+            altitude: (result['altitude'] as num?)?.toDouble() ?? 0,
+            heading: (result['bearing'] as num?)?.toDouble() ?? 0,
+            speed: (result['speed'] as num?)?.toDouble() ?? 0,
+            speedAccuracy: 0,
+            altitudeAccuracy: 0,
+            headingAccuracy: 0,
+          ));
+        }
+      }
+      sub?.cancel();
+      location.destroy();
+    });
+
+    location.startLocation();
+    return await completer.future.timeout(
+      const Duration(seconds: 12),
+      onTimeout: () {
+        sub?.cancel();
+        location.stopLocation();
+        location.destroy();
+        return null;
+      },
+    );
   }
 
   Future<void> _fetchRealData() async {
-    await _loadServerUrl();
     try {
-      // 1. 先尝试获取真实定位
-      Position? position = await _determinePosition();
+      // 只标记推荐数据加载中，不挡收藏和历史
+      if (_recommendations.isEmpty) {
+        setState(() => _isLoading = true);
+      }
+      _errorMsg = '';
+      // 1. 定位：推荐请求使用独立定位（Device_Sensors 模式，无道路吸附）
+      //    注意：地图 onLocationChanged 回调的坐标含道路吸附（定位到路上），推荐请求不能直接用
+      //    导航模块 (_startLocationTracking) 的 Hight_Accuracy 含道路吸附，那是对的，不动它
+      final isDefaultLocation =
+          _userLat == 30.583547 && _userLng == 114.253265;
+      final position = await _determinePosition(
+        useCache: !isDefaultLocation, // 非首次刷新时优先用缓存，减少等待
+      );
       if (position != null) {
         _userLat = position.latitude;
         _userLng = position.longitude;
+        // 定位成功：用真实坐标重新获取天气
+        _fetchWeather();
+      } else if (!isDefaultLocation) {
+        // 定位失败时回退到此前的地图坐标兜底（可能含道路吸附，但比没数据强）
+      } else {
+        setState(() {
+          _isLoading = false;
+        });
+        return;
       }
 
-      final client = HttpClient();
-      final request = await client.postUrl(Uri.parse('$_serverUrl/api/recommend'));
-      request.headers.set('content-type', 'application/json');
-      
-      final payload = jsonEncode({
+      // 2. 使用 ApiClient 请求推荐（支持游客和登录用户）
+      final payload = {
         "user_location": {"lat": _userLat, "lng": _userLng},
         "current_soc": _currentSoc,
         "target_soc": 100.0,
@@ -458,21 +722,27 @@ class _SleekHomeWrapperState extends State<SleekHomeWrapper> {
           "power_weight": 0.1,
           "prefer_ultra": false
         }
-      });
-      request.write(payload);
+      };
 
-      final response = await request.close();
-      final responseBody = await response.transform(utf8.decoder).join();
-      if (response.statusCode == 200) {
-        final data = jsonDecode(responseBody);
+      final resp = await ApiClient().post('/api/recommend', data: payload);
+      if (resp.statusCode == 200) {
+        final data = resp.data;
         setState(() {
           _recommendations = data['data']['recommendations'] ?? [];
           _isLoading = false;
           _updateMapMarkers();
         });
+        // 推荐数据加载完成后，将地图中心移到用户当前位置
+        if (_mapController != null &&
+            _userLat.abs() > 0.01 &&
+            _userLng.abs() > 0.01) {
+          _mapController!.moveCamera(CameraUpdate.newCameraPosition(
+              CameraPosition(
+                  target: LatLng(_userLat, _userLng), zoom: 14.5)));
+        }
       } else {
         setState(() {
-          _errorMsg = "API Failed: ${response.statusCode} - $responseBody";
+          _errorMsg = "API Failed: ${resp.statusCode} - ${resp.data}";
           _isLoading = false;
         });
       }
@@ -489,13 +759,12 @@ class _SleekHomeWrapperState extends State<SleekHomeWrapper> {
     Map<String, int> newIdToIndex = {};
 
     // 我的位置 - 蓝色自定义图标
-    newMarkers.add(
-      Marker(
-        position: LatLng(_userLat, _userLng),
-        icon: _userLocationIcon ?? BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
-        infoWindow: const InfoWindow(title: '我的位置'),
-      )
-    );
+    newMarkers.add(Marker(
+      position: LatLng(_userLat, _userLng),
+      icon: _userLocationIcon ??
+          BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
+      infoWindow: const InfoWindow(title: '我的位置'),
+    ));
 
     for (int i = 0; i < _recommendations.length; i++) {
       final rec = _recommendations[i];
@@ -511,7 +780,8 @@ class _SleekHomeWrapperState extends State<SleekHomeWrapper> {
         icon: isSelected ? _stationIconSelected : _stationIcon,
         infoWindow: InfoWindow(
           title: station['name'] ?? '未知充电站',
-          snippet: '🕐 ${rec['duration'] ?? 0}分钟 · ${(station['availability'] ?? {})['available'] ?? 0}/${(station['availability'] ?? {})['total'] ?? 0}桩',
+          snippet:
+              '🕐 ${rec['duration'] ?? 0}分钟 · ${(station['availability'] ?? {})['available'] ?? 0}/${(station['availability'] ?? {})['total'] ?? 0}桩',
         ),
         onTap: (id) => _onMarkerTapped(newIdToIndex[id] ?? i),
       );
@@ -527,21 +797,27 @@ class _SleekHomeWrapperState extends State<SleekHomeWrapper> {
   void _onMarkerTapped(int index) {
     setState(() => _selectedMarkerIndex = index);
     if (_pageController.hasClients) {
-      _pageController.animateToPage(index, duration: const Duration(milliseconds: 400), curve: Curves.easeInOut);
+      _pageController.animateToPage(index,
+          duration: const Duration(milliseconds: 400), curve: Curves.easeInOut);
     }
   }
 
   void _goToMyLocation() {
-    if (_mapController != null) {
-      _mapController!.moveCamera(
-        CameraUpdate.newCameraPosition(
-          CameraPosition(target: LatLng(_userLat, _userLng), zoom: 14.5)
-        )
-      );
+    // 校验坐标有效性：避免跳到 (0,0) 或武汉默认值
+    if (_userLat.abs() < 0.01 || _userLng.abs() < 0.01) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('定位尚未完成，请稍候...'),
+        duration: Duration(seconds: 2),
+      ));
+      return;
     }
-    // 让卡片也平滑滚回第一张（距离最近/排名最高的推荐位）
-    if (_pageController.hasClients && _pageController.page?.round() != 0) {
-      _pageController.animateToPage(0, duration: const Duration(milliseconds: 400), curve: Curves.easeInOut);
+    if (_mapController != null) {
+      _mapController!.moveCamera(CameraUpdate.newCameraPosition(
+          CameraPosition(target: LatLng(_userLat, _userLng), zoom: 14.5)));
+    }
+    // 取消选中状态，但不移动滑块——等用户再次滑动时地图再跟随
+    if (_selectedMarkerIndex != -1) {
+      setState(() => _selectedMarkerIndex = -1);
     }
   }
 
@@ -549,40 +825,147 @@ class _SleekHomeWrapperState extends State<SleekHomeWrapper> {
 
   void _showVehicleSettings() {
     showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      isScrollControlled: true,
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setSheetState) {
+        context: context,
+        backgroundColor: Colors.transparent,
+        isScrollControlled: true,
+        builder: (context) {
+          return StatefulBuilder(builder: (context, setSheetState) {
             return Container(
-              padding: const EdgeInsets.only(left: 24, right: 24, top: 24, bottom: 40),
+              padding: const EdgeInsets.only(
+                  left: 24, right: 24, top: 24, bottom: 40),
               decoration: const BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.vertical(top: Radius.circular(24))
-              ),
+                  color: Colors.white,
+                  borderRadius:
+                      BorderRadius.vertical(top: Radius.circular(24))),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('车辆与电量调节', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.black87)),
-                  const SizedBox(height: 24),
-                  const Text('切换车型', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.black54)),
-                  const SizedBox(height: 12),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                    children: [
-                      _buildCarChip('Model Y', 60.0, 14.5, setSheetState),
-                      _buildCarChip('Xiaomi SU7', 101.0, 15.8, setSheetState),
-                      _buildCarChip('BYD 汉', 85.4, 16.2, setSheetState),
-                    ],
+                  const Text('车辆与电量调节',
+                      style: TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.black87)),
+                  const SizedBox(height: 20),
+
+                  // ---- 品牌选择器（横向滚动） ----
+                  const Text('选择品牌',
+                      style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.black54)),
+                  const SizedBox(height: 10),
+                  SizedBox(
+                    height: 36,
+                    child: ListView.builder(
+                      scrollDirection: Axis.horizontal,
+                      itemCount: VehicleData.brands.keys.length,
+                      itemBuilder: (ctx, i) {
+                        final brand =
+                            VehicleData.brands.keys.elementAt(i);
+                        final isSelected = _currentBrand == brand;
+                        return Padding(
+                          padding: const EdgeInsets.only(right: 8),
+                          child: GestureDetector(
+                            onTap: () {
+                              setSheetState(() {
+                                _currentBrand = brand;
+                                // 切换品牌时自动选该品牌的第一款车型
+                                final models =
+                                    VehicleData.getModels(brand);
+                                if (models.isNotEmpty) {
+                                  _currentCar =
+                                      models.first['model'] as String;
+                                  _batteryCapacity =
+                                      (models.first['battery'] as num)
+                                          .toDouble();
+                                  _energyConsumption =
+                                      (models.first['consumption']
+                                              as num)
+                                          .toDouble();
+                                }
+                              });
+                            },
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 14, vertical: 6),
+                              decoration: BoxDecoration(
+                                color: isSelected
+                                    ? const Color(0xFF007AFF)
+                                    : Colors.grey.shade100,
+                                borderRadius:
+                                    BorderRadius.circular(18),
+                              ),
+                              child: Text(
+                                brand,
+                                style: TextStyle(
+                                  color: isSelected
+                                      ? Colors.white
+                                      : Colors.black87,
+                                  fontSize: 13,
+                                  fontWeight: isSelected
+                                      ? FontWeight.bold
+                                      : FontWeight.w500,
+                                ),
+                              ),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
                   ),
-                  const SizedBox(height: 32),
+                  const SizedBox(height: 20),
+
+                  // ---- 车型选择器（Wrap 布局） ----
+                  Text('选择车型 - $_currentBrand',
+                      style: const TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.black54)),
+                  const SizedBox(height: 10),
+                  _buildModelSelector(setSheetState),
+                  const SizedBox(height: 24),
+
+                  // ---- 当前选中车型规格摘要 ----
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF007AFF).withOpacity(0.06),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.electric_car,
+                            color: Color(0xFF007AFF), size: 20),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            '$_currentCar · ${_batteryCapacity.toStringAsFixed(1)}kWh · ${_energyConsumption.toStringAsFixed(1)}kWh/100km',
+                            style: const TextStyle(
+                                fontSize: 12,
+                                color: Color(0xFF007AFF),
+                                fontWeight: FontWeight.w600),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+
+                  // ---- SOC 电量滑块 ----
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      const Text('当前剩余电量 (SOC)', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.black54)),
-                      Text('${_currentSoc.toInt()}%', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w900, color: Color(0xFF007AFF))),
+                      const Text('当前剩余电量 (SOC)',
+                          style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.black54)),
+                      Text('${_currentSoc.toInt()}%',
+                          style: const TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.w900,
+                              color: Color(0xFF007AFF))),
                     ],
                   ),
                   Slider(
@@ -590,54 +973,153 @@ class _SleekHomeWrapperState extends State<SleekHomeWrapper> {
                     min: 5,
                     max: 100,
                     activeColor: const Color(0xFF007AFF),
-                    onChanged: (val) => setSheetState(() => _currentSoc = val),
+                    onChanged: (val) =>
+                        setSheetState(() => _currentSoc = val),
                   ),
                   const SizedBox(height: 24),
+
+                  // ---- 应用按钮 ----
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton(
                       onPressed: () {
                         Navigator.pop(context);
+                        // 保存车型设置到本地（含品牌信息）
+                        DataRepository().saveCarSettings({
+                          'brand': _currentBrand,
+                          'car_name': _currentCar,
+                          'battery_capacity': _batteryCapacity,
+                          'energy_consumption': _energyConsumption,
+                          'current_soc': _currentSoc,
+                        });
+                        // 显示加载状态，让用户知道正在重新测算
                         setState(() => _isLoading = true);
                         _fetchRealData();
                       },
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF007AFF),
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16))
-                      ),
-                      child: const Text('应用并重新测算', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
+                          backgroundColor: const Color(0xFF007AFF),
+                          padding:
+                              const EdgeInsets.symmetric(vertical: 16),
+                          shape: RoundedRectangleBorder(
+                              borderRadius:
+                                  BorderRadius.circular(16))),
+                      child: const Text('应用并重新测算',
+                          style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white)),
                     ),
                   )
                 ],
               ),
             );
-          }
+          });
+        });
+  }
+
+  /// 构建当前品牌下的车型选择器（Wrap 布局）
+  Widget _buildModelSelector(StateSetter setSheetState) {
+    final models = VehicleData.getModels(_currentBrand);
+    if (models.isEmpty) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 8),
+        child: Text('暂无车型数据',
+            style: TextStyle(color: Colors.grey, fontSize: 13)),
+      );
+    }
+
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: models.map((model) {
+        final modelName = model['model'] as String;
+        final isSelected = _currentCar == modelName;
+        return GestureDetector(
+          onTap: () {
+            setSheetState(() {
+              _currentCar = modelName;
+              _batteryCapacity =
+                  (model['battery'] as num).toDouble();
+              _energyConsumption =
+                  (model['consumption'] as num).toDouble();
+            });
+          },
+          child: Container(
+            padding:
+                const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: isSelected
+                  ? const Color(0xFF007AFF)
+                  : Colors.grey.shade100,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(
+                color: isSelected
+                    ? const Color(0xFF007AFF)
+                    : Colors.grey.shade200,
+              ),
+            ),
+            child: Text(
+              modelName,
+              style: TextStyle(
+                color: isSelected ? Colors.white : Colors.black87,
+                fontSize: 12,
+                fontWeight:
+                    isSelected ? FontWeight.bold : FontWeight.w500,
+              ),
+            ),
+          ),
         );
-      }
+      }).toList(),
     );
   }
 
-  Widget _buildCarChip(String name, double cap, double con, StateSetter setSheetState) {
-    bool isSelected = _currentCar == name;
-    return InkWell(
-      onTap: () {
-        setSheetState(() {
-          _currentCar = name;
-          _batteryCapacity = cap;
-          _energyConsumption = con;
-        });
-      },
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-        decoration: BoxDecoration(
-          color: isSelected ? const Color(0xFF007AFF) : Colors.grey.shade100,
-          borderRadius: BorderRadius.circular(20)
-        ),
-        child: Text(name, style: TextStyle(
-          color: isSelected ? Colors.white : Colors.black87, 
-          fontWeight: isSelected ? FontWeight.bold : FontWeight.w500
-        )),
+  /// 构建圆形电量指示器：环形进度条 + 闪电(稍上移) + 百分比(闪电下方，整体在环内)
+  Widget _buildBatteryRing() {
+    // 根据电量选择颜色：绿(≥50%) / 橙(20-50%) / 红(<20%)
+    Color batteryColor;
+    if (_currentSoc >= 50) {
+      batteryColor = const Color(0xFF34C759); // 绿色
+    } else if (_currentSoc >= 20) {
+      batteryColor = const Color(0xFFFF9500); // 橙色
+    } else {
+      batteryColor = const Color(0xFFFF3B30); // 红色
+    }
+
+    return SizedBox(
+      width: 40,
+      height: 40,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          // 环形进度条（背景）
+          SizedBox(
+            width: 40,
+            height: 40,
+            child: CircularProgressIndicator(
+              value: _currentSoc / 100.0,
+              strokeWidth: 3,
+              backgroundColor: Colors.grey.shade200,
+              valueColor:
+                  AlwaysStoppedAnimation<Color>(batteryColor),
+            ),
+          ),
+          // 闪电(稍上) + 百分比(下)，整体居中于环内
+          Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.bolt, color: batteryColor, size: 16),
+              Text(
+                '${_currentSoc.toInt()}%',
+                style: TextStyle(
+                  fontSize: 8.5,
+                  fontWeight: FontWeight.w900,
+                  color: batteryColor,
+                  height: 1.1,
+                ),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
@@ -650,13 +1132,35 @@ class _SleekHomeWrapperState extends State<SleekHomeWrapper> {
           // 1. 真高德地图底层
           Positioned.fill(
             child: AMapWidget(
-              privacyStatement: const AMapPrivacyStatement(hasContains: true, hasShow: true, hasAgree: true),
+              privacyStatement: const AMapPrivacyStatement(
+                  hasContains: true, hasShow: true, hasAgree: true),
               apiKey: const AMapApiKey(androidKey: AMAP_KEY),
               initialCameraPosition: CameraPosition(
                 target: LatLng(_userLat, _userLng),
                 zoom: 12.0, // 把视野放宽一点以显示更多充电站
               ),
               markers: _markers,
+              scaleEnabled: false, // 底部卡片会遮挡比例尺，直接关闭
+              myLocationStyleOptions: MyLocationStyleOptions(true),
+              onLocationChanged: (AMapLocation location) {
+                // 高德地图自带定位（和手机高德 App 同一引擎）
+                // 过滤无效坐标：(0,0) 是 SDK 初始化时的占位值
+                final lat = location.latLng.latitude;
+                final lng = location.latLng.longitude;
+                if (mounted &&
+                    lat.abs() > 0.01 &&
+                    lng.abs() > 0.01) {
+                  // 首次拿到有效定位时，自动刷新推荐
+                  final wasDefault = _userLat == 30.583547;
+                  setState(() {
+                    _userLat = lat;
+                    _userLng = lng;
+                  });
+                  if (wasDefault) {
+                    _fetchRealData();
+                  }
+                }
+              },
               onMapCreated: (AMapController controller) {
                 _mapController = controller;
               },
@@ -676,15 +1180,22 @@ class _SleekHomeWrapperState extends State<SleekHomeWrapper> {
                   decoration: BoxDecoration(
                     color: Colors.white,
                     shape: BoxShape.circle,
-                    boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.2), blurRadius: 6)],
+                    boxShadow: [
+                      BoxShadow(
+                          color: Colors.black.withOpacity(0.2), blurRadius: 6)
+                    ],
                   ),
                   child: Stack(
                     alignment: Alignment.center,
                     children: [
                       // 向上箭头（指北）
-                      Icon(Icons.navigation, color: Colors.red.shade600, size: 28),
+                      Icon(Icons.navigation,
+                          color: Colors.red.shade600, size: 28),
                       // 指向标记（东南西北）
-                      Positioned(top: 3, child: Icon(Icons.arrow_drop_up, color: Colors.red.shade600, size: 16)),
+                      Positioned(
+                          top: 3,
+                          child: Icon(Icons.arrow_drop_up,
+                              color: Colors.red.shade600, size: 16)),
                     ],
                   ),
                 ),
@@ -704,19 +1215,33 @@ class _SleekHomeWrapperState extends State<SleekHomeWrapper> {
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: Row(
                   children: [
-                    const Icon(Icons.bolt, color: Color(0xFF007AFF), size: 26),
+                    // 圆形电量指示器：闪电图标 + 环形进度条
+                    _buildBatteryRing(),
                     const SizedBox(width: 10),
-                    Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text('$_currentCar - 实时电量 ${_currentSoc.toInt()}%', 
-                          style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: Colors.black87)),
-                        Text('$_weatherIcon $_temperature°C · 续航 ${(_batteryCapacity * (_currentSoc/100) / _energyConsumption * 100).toInt()}km', 
-                          style: const TextStyle(color: Colors.black54, fontSize: 11, fontWeight: FontWeight.w500)),
-                      ],
+                    Expanded(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          FittedBox(
+                            fit: BoxFit.scaleDown,
+                            alignment: Alignment.centerLeft,
+                            child: Text(_currentCar,
+                                style: const TextStyle(
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 13,
+                                    color: Colors.black87)),
+                          ),
+                          Text(
+                              '$_weatherIcon $_temperature°C · 续航 ${(_batteryCapacity * (_currentSoc / 100) / _energyConsumption * 100).toInt()}km',
+                              style: const TextStyle(
+                                  color: Colors.black54,
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w500)),
+                        ],
+                      ),
                     ),
-                    const Spacer(),
+                    const SizedBox(width: 4),
                     // ⚙️ 设置图标
                     GestureDetector(
                       onTap: _showVehicleSettings,
@@ -727,7 +1252,8 @@ class _SleekHomeWrapperState extends State<SleekHomeWrapper> {
                           color: const Color(0xFF007AFF).withOpacity(0.1),
                           shape: BoxShape.circle,
                         ),
-                        child: const Icon(Icons.tune, color: Color(0xFF007AFF), size: 18),
+                        child: const Icon(Icons.tune,
+                            color: Color(0xFF007AFF), size: 18),
                       ),
                     ),
                     const SizedBox(width: 8),
@@ -736,18 +1262,18 @@ class _SleekHomeWrapperState extends State<SleekHomeWrapper> {
                       onTap: () {
                         Navigator.push(
                           context,
-                          MaterialPageRoute(builder: (_) => MinePage(
-                            favorites: _favorites,
-                            recommendations: _recommendations,
-                            userLat: _userLat,
-                            userLng: _userLng,
-                            carName: _currentCar,
-                            soc: _currentSoc,
-                            batteryCapacity: _batteryCapacity,
-                            energyConsumption: _energyConsumption,
-                            history: _history,
-                            onLogout: widget.onLogout,
-                          )),
+                          MaterialPageRoute(
+                              builder: (_) => MinePage(
+                                    favorites: _favorites,
+                                    userLat: _userLat,
+                                    userLng: _userLng,
+                                    carName: _currentCar,
+                                    soc: _currentSoc,
+                                    batteryCapacity: _batteryCapacity,
+                                    energyConsumption: _energyConsumption,
+                                    history: _history,
+                                    onLogout: widget.onLogout,
+                                  )),
                         );
                       },
                       child: Container(
@@ -757,7 +1283,8 @@ class _SleekHomeWrapperState extends State<SleekHomeWrapper> {
                           color: const Color(0xFF007AFF),
                           shape: BoxShape.circle,
                         ),
-                        child: const Icon(Icons.person, color: Colors.white, size: 20),
+                        child: const Icon(Icons.person,
+                            color: Colors.white, size: 20),
                       ),
                     ),
                   ],
@@ -765,102 +1292,6 @@ class _SleekHomeWrapperState extends State<SleekHomeWrapper> {
               ),
             ),
           ),
-
-          // 4. 公告滚动条（仅在有公告时显示）
-          if (_announcements.isNotEmpty)
-            Positioned(
-              top: 115,
-              left: 16,
-              right: 16,
-              child: Container(
-                height: 36,
-                decoration: BoxDecoration(
-                  color: const Color(0xFF007AFF).withOpacity(0.95),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10),
-                      child: const Row(
-                        children: [
-                          Icon(Icons.campaign, color: Colors.white, size: 16),
-                          SizedBox(width: 4),
-                          Text('公告', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
-                        ],
-                      ),
-                    ),
-                    Expanded(
-                      child: NotificationListener<ScrollNotification>(
-                        onNotification: (notification) {
-                          if (notification is ScrollEndNotification &&
-                              notification.metrics.pixels >= notification.metrics.maxScrollExtent - 1) {
-                            // 滚动到底部后，稍作延迟换到下一条
-                            Future.delayed(const Duration(seconds: 3), () {
-                              if (mounted && _announcements.isNotEmpty) {
-                                final nextPage = (_currentAnnouncementPage + 1) % _announcements.length;
-                                _announcementController.animateToPage(
-                                  nextPage,
-                                  duration: const Duration(milliseconds: 400),
-                                  curve: Curves.easeInOut,
-                                );
-                              }
-                            });
-                          }
-                          return false;
-                        },
-                        child: PageView.builder(
-                          controller: _announcementController,
-                          onPageChanged: (i) => setState(() => _currentAnnouncementPage = i),
-                          itemCount: _announcements.length,
-                          physics: const ClampingScrollPhysics(),
-                          itemBuilder: (ctx, i) => GestureDetector(
-                            onTap: () => _showAnnouncementDetail(_announcements[i]),
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 8),
-                              child: Row(
-                                children: [
-                                  Expanded(
-                                    child: Text(
-                                      _announcements[i]['title'] ?? '',
-                                      style: const TextStyle(color: Colors.white, fontSize: 13),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                  ),
-                                  const Icon(Icons.chevron_right, color: Colors.white70, size: 18),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                    // 页码点
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: List.generate(
-                          _announcements.length > 5 ? 5 : _announcements.length,
-                          (i) => Container(
-                            width: 5,
-                            height: 5,
-                            margin: const EdgeInsets.symmetric(horizontal: 2),
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              color: i == _currentAnnouncementPage % (_announcements.length > 5 ? 5 : _announcements.length)
-                                  ? Colors.white
-                                  : Colors.white38,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
 
           // 5. 底部悬浮：横向滑动超级卡片 (高度缩减，彻底贴底)
           Positioned(
@@ -869,85 +1300,102 @@ class _SleekHomeWrapperState extends State<SleekHomeWrapper> {
             right: 0,
             height: 160,
             child: _isLoading
-              ? Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const CircularProgressIndicator(),
-                      const SizedBox(height: 12),
-                      Text('正在搜索充电站...', style: TextStyle(color: Colors.grey.shade600, fontSize: 13)),
-                    ],
-                  ),
-                )
-              : _errorMsg.isNotEmpty
-                ? _ErrorRetryCard(errorMsg: _errorMsg, onRetry: _fetchRealData)
-                : _recommendations.isEmpty
-                  ? _EmptyStationsCard(onRetry: _fetchRealData)
-                  : PageView.builder(
-              controller: _pageController,
-              itemCount: _recommendations.length,
-              physics: const BouncingScrollPhysics(),
-              onPageChanged: (index) {
-                if (_mapController != null && index < _recommendations.length) {
-                  final station = _recommendations[index]['station'];
-                  if (station != null && station['location'] != null) {
-                    double lat = station['location']['lat'];
-                    double lng = station['location']['lng'];
-                    // 滑动时，镜头优雅地平滑位移并放大对准该充电站
-                    _mapController!.moveCamera(
-                      CameraUpdate.newCameraPosition(
-                        CameraPosition(target: LatLng(lat, lng), zoom: 14.5)
-                      )
-                    );
-                  }
-                }
-              },
-              itemBuilder: (context, index) {
-                return AnimatedBuilder(
-                  animation: _pageController,
-                  builder: (context, child) {
-                    double value = 1.0;
-                    if (_pageController.position.haveDimensions) {
-                      value = _pageController.page! - index;
-                      value = (1 - (value.abs() * 0.15)).clamp(0.0, 1.0);
-                    }
-                    return Center(
-                      child: SizedBox(
-                        height: Curves.easeInOut.transform(value) * 160,
-                        width: Curves.easeInOut.transform(value) * 340,
-                        child: child,
-                      ),
-                    );
-                  },
-                  child: Container(
-                    margin: const EdgeInsets.symmetric(horizontal: 8),
-                    child: StationCarouselCard(
-                      index: index,
-                      data: _recommendations[index],
-                      userLat: _userLat,
-                      userLng: _userLng,
-                      isFavorite: _isFavorite(_getStationId(_recommendations[index]['station'] ?? {})),
-                      onToggleFavorite: () => _toggleFavorite(_getStationId(_recommendations[index]['station'] ?? {})),
-                      onVisit: () => _addHistory(_recommendations[index]),
+                ? Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const CircularProgressIndicator(),
+                        const SizedBox(height: 12),
+                        Text('正在搜索充电站...',
+                            style: TextStyle(
+                                color: Colors.grey.shade600, fontSize: 13)),
+                      ],
                     ),
-                  ),
-                );
-              },
-            ),
+                  )
+                : _errorMsg.isNotEmpty
+                    ? _ErrorRetryCard(
+                        errorMsg: _errorMsg, onRetry: _fetchRealData)
+                    : _recommendations.isEmpty
+                        ? _EmptyStationsCard(onRetry: _fetchRealData)
+                        : PageView.builder(
+                            controller: _pageController,
+                            itemCount: _recommendations.length,
+                            physics: const BouncingScrollPhysics(),
+                            onPageChanged: (index) {
+                              if (_mapController != null &&
+                                  index < _recommendations.length) {
+                                final station =
+                                    _recommendations[index]['station'];
+                                if (station != null &&
+                                    station['location'] != null) {
+                                  double lat = station['location']['lat'];
+                                  double lng = station['location']['lng'];
+                                  // 滑动时，镜头优雅地平滑位移并放大对准该充电站
+                                  _mapController!.moveCamera(
+                                      CameraUpdate.newCameraPosition(
+                                          CameraPosition(
+                                              target: LatLng(lat, lng),
+                                              zoom: 14.5)));
+                                }
+                              }
+                            },
+                            itemBuilder: (context, index) {
+                              return AnimatedBuilder(
+                                animation: _pageController,
+                                builder: (context, child) {
+                                  double value = 1.0;
+                                  if (_pageController.position.haveDimensions) {
+                                    value = _pageController.page! - index;
+                                    value = (1 - (value.abs() * 0.15))
+                                        .clamp(0.0, 1.0);
+                                  }
+                                  return Center(
+                                    child: SizedBox(
+                                      height:
+                                          Curves.easeInOut.transform(value) *
+                                              160,
+                                      width: Curves.easeInOut.transform(value) *
+                                          340,
+                                      child: child,
+                                    ),
+                                  );
+                                },
+                                child: Container(
+                                  margin:
+                                      const EdgeInsets.symmetric(horizontal: 8),
+                                  child: StationCarouselCard(
+                                    index: index,
+                                    data: _recommendations[index],
+                                    userLat: _userLat,
+                                    userLng: _userLng,
+                                    isFavorite: _isFavorite(_getStationId(
+                                        _recommendations[index]['station'] ??
+                                            {})),
+                                    onToggleFavorite: () => _toggleFavorite(
+                                        _getStationId(_recommendations[index]
+                                                ['station'] ??
+                                            {})),
+                                    onVisit: () =>
+                                        _addHistory(_recommendations[index]),
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
           ),
-          
+
           // 悬浮导航定位钮跟随下放
           Positioned(
-            bottom: 190, 
-            right: 16,
-            child: FloatingActionButton(
-              mini: true, // 使用更精巧的小按钮
-              backgroundColor: Colors.white,
-              elevation: 4,
-              onPressed: _goToMyLocation,
-              child: const Icon(Icons.my_location, color: Colors.blueAccent, size: 24),
-            )
-          )
+              bottom: 190,
+              right: 16,
+              child: FloatingActionButton(
+                mini: true, // 使用更精巧的小按钮
+                backgroundColor: Colors.white,
+                elevation: 4,
+                onPressed: _goToMyLocation,
+                child: const Icon(Icons.my_location,
+                    color: Colors.blueAccent, size: 24),
+              ))
         ],
       ),
     );
@@ -960,7 +1408,7 @@ class StationCarouselCard extends StatelessWidget {
   final double userLat;
   final double userLng;
   final bool isFavorite;
-  final VoidCallback onToggleFavorite;
+  final Future<void> Function() onToggleFavorite;
   final VoidCallback? onVisit;
   const StationCarouselCard({
     super.key,
@@ -976,7 +1424,7 @@ class StationCarouselCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     bool isRecommended = index == 0;
-    
+
     // 解析后端返回的各种复杂数据
     final station = data['station'] ?? {};
     final stationName = station['name'] ?? '未知充电站';
@@ -985,7 +1433,7 @@ class StationCarouselCard extends StatelessWidget {
     final power = station['power_kw'] ?? 0;
     final cost = data['estimated_cost'] ?? 0;
     final avail = station['availability'] ?? {};
-    
+
     // 提取高价值 tag 分配颜色
     Color insightColor = Colors.black54;
     if (insight.contains('🌟')) insightColor = Colors.orange.shade700;
@@ -995,106 +1443,124 @@ class StationCarouselCard extends StatelessWidget {
     if (insight.contains('⏰')) insightColor = Colors.amber.shade700;
 
     return GestureDetector(
-      onTap: () {
-        onVisit?.call();
-        Navigator.push(context, MaterialPageRoute(
-          builder: (_) => StationDetailScreen(
-            data: data,
-            userLat: userLat,
-            userLng: userLng,
-            isFavorite: isFavorite,
-            onToggleFavorite: onToggleFavorite,
-          )
-        ));
-      },
-      child: Container(
-        decoration: BoxDecoration(
-          color: Colors.white, 
-          borderRadius: BorderRadius.circular(24.0),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.08),
-              blurRadius: 24,
-              spreadRadius: 2,
-              offset: const Offset(0, 10),
-            ),
-          ],
-        ),
-        child: Stack(
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 30, 16, 12), // 增加顶部 Padding 完美避开 TOP 标签的物理遮挡
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        onTap: () {
+          onVisit?.call();
+          Navigator.push(
+              context,
+              MaterialPageRoute(
+                  builder: (_) => StationDetailScreen(
+                        data: data,
+                        userLat: userLat,
+                        userLng: userLng,
+                        isFavorite: isFavorite,
+                        onToggleFavorite: onToggleFavorite,
+                      )));
+        },
+        child: Container(
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(24.0),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.08),
+                blurRadius: 24,
+                spreadRadius: 2,
+                offset: const Offset(0, 10),
+              ),
+            ],
+          ),
+          child: Stack(
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(
+                    16, 30, 16, 12), // 增加顶部 Padding 完美避开 TOP 标签的物理遮挡
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Expanded(
-                      child: Text(
-                        stationName,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black87),
-                      ),
-                    ),
-                    Text(
-                      '${distKm}km',
-                      style: const TextStyle(color: Color(0xFF007AFF), fontWeight: FontWeight.bold, fontSize: 13),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  insight.isNotEmpty ? insight : '常规充电站',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: insightColor, 
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600
-                  ),
-                ),
-                const Spacer(),
-                Row(
-                  children: [
-                    _buildTag('${power}kW', Colors.purple),
-                    const SizedBox(width: 8),
-                    _buildTag('空闲 ${avail['available'] ?? 0}', Colors.green),
-                    const Spacer(),
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.end,
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        const Text('预估花费', style: TextStyle(color: Colors.black54, fontSize: 10, fontWeight: FontWeight.bold)),
-                        Text('¥$cost', 
-                          style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w900, color: Colors.black87)),
+                        Expanded(
+                          child: Text(
+                            stationName,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.black87),
+                          ),
+                        ),
+                        Text(
+                          '${distKm}km',
+                          style: const TextStyle(
+                              color: Color(0xFF007AFF),
+                              fontWeight: FontWeight.bold,
+                              fontSize: 13),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      insight.isNotEmpty ? insight : '常规充电站',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                          color: insightColor,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600),
+                    ),
+                    const Spacer(),
+                    Row(
+                      children: [
+                        _buildTag('${power}kW', Colors.purple),
+                        const SizedBox(width: 8),
+                        _buildTag(
+                            '空闲 ${avail['available'] ?? 0}', Colors.green),
+                        const Spacer(),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            const Text('预估花费',
+                                style: TextStyle(
+                                    color: Colors.black54,
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.bold)),
+                            Text('¥$cost',
+                                style: const TextStyle(
+                                    fontSize: 22,
+                                    fontWeight: FontWeight.w900,
+                                    color: Colors.black87)),
+                          ],
+                        )
                       ],
                     )
                   ],
-                )
-              ],
-            ),
-          ),
-          if (isRecommended)
-            Positioned(
-              left: 0,
-              top: 0,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-                decoration: const BoxDecoration(
-                  color: Color(0xFF007AFF),
-                  borderRadius: BorderRadius.only(
-                    topLeft: Radius.circular(24),
-                    bottomRight: Radius.circular(16)
-                  ),
                 ),
-                child: const Text('🌟 TOP 1 推荐', 
-                  style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold)),
               ),
-            )
-        ],
-      ),
-    ));
+              if (isRecommended)
+                Positioned(
+                  left: 0,
+                  top: 0,
+                  child: Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                    decoration: const BoxDecoration(
+                      color: Color(0xFF007AFF),
+                      borderRadius: BorderRadius.only(
+                          topLeft: Radius.circular(24),
+                          bottomRight: Radius.circular(16)),
+                    ),
+                    child: const Text('🌟 TOP 1 推荐',
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold)),
+                  ),
+                )
+            ],
+          ),
+        ));
   }
 
   Widget _buildTag(String text, Color color) {
@@ -1105,7 +1571,9 @@ class StationCarouselCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(8),
         border: Border.all(color: color.withOpacity(0.3)),
       ),
-      child: Text(text, style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.w600)),
+      child: Text(text,
+          style: TextStyle(
+              color: color, fontSize: 10, fontWeight: FontWeight.w600)),
     );
   }
 }
@@ -1136,7 +1604,7 @@ class StationDetailScreen extends StatefulWidget {
   final double userLat;
   final double userLng;
   final bool isFavorite;
-  final VoidCallback onToggleFavorite;
+  final Future<void> Function() onToggleFavorite;
   const StationDetailScreen({
     super.key,
     required this.data,
@@ -1200,7 +1668,8 @@ class _StationDetailScreenState extends State<StationDetailScreen> {
                   color: Colors.white.withOpacity(0.9),
                   shape: BoxShape.circle,
                 ),
-                child: const Icon(Icons.arrow_back, color: Color(0xFF007AFF), size: 20),
+                child: const Icon(Icons.arrow_back,
+                    color: Color(0xFF007AFF), size: 20),
               ),
               onPressed: () => Navigator.pop(context),
             ),
@@ -1218,9 +1687,9 @@ class _StationDetailScreenState extends State<StationDetailScreen> {
                     size: 20,
                   ),
                 ),
-                onPressed: () {
-                  widget.onToggleFavorite();
-                  setState(() => _isFav = !_isFav);
+                onPressed: () async {
+                  await widget.onToggleFavorite();
+                  if (mounted) setState(() => _isFav = !_isFav);
                 },
               ),
               const SizedBox(width: 8),
@@ -1245,24 +1714,32 @@ class _StationDetailScreenState extends State<StationDetailScreen> {
                           color: Colors.white.withOpacity(0.2),
                           shape: BoxShape.circle,
                         ),
-                        child: const Icon(Icons.ev_station, size: 50, color: Colors.white),
+                        child: const Icon(Icons.ev_station,
+                            size: 50, color: Colors.white),
                       ),
                       const SizedBox(height: 16),
                       Text(
                         name,
-                        style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold),
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold),
                         textAlign: TextAlign.center,
                       ),
                       const SizedBox(height: 8),
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 16, vertical: 6),
                         decoration: BoxDecoration(
                           color: Colors.white.withOpacity(0.2),
                           borderRadius: BorderRadius.circular(20),
                         ),
                         child: Text(
                           insight.isNotEmpty ? insight : '优质充电站',
-                          style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600),
+                          style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600),
                         ),
                       ),
                     ],
@@ -1285,7 +1762,10 @@ class _StationDetailScreenState extends State<StationDetailScreen> {
                       color: Colors.white,
                       borderRadius: BorderRadius.circular(20),
                       boxShadow: [
-                        BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 20, offset: const Offset(0, 8)),
+                        BoxShadow(
+                            color: Colors.black.withOpacity(0.04),
+                            blurRadius: 20,
+                            offset: const Offset(0, 8)),
                       ],
                     ),
                     child: Row(
@@ -1301,7 +1781,8 @@ class _StationDetailScreenState extends State<StationDetailScreen> {
                         _DetailStatCard(
                           icon: Icons.timer_outlined,
                           iconColor: const Color(0xFFFF9500),
-                          value: '${widget.data['estimated_charging_time'] ?? 0}',
+                          value:
+                              '${widget.data['estimated_charging_time'] ?? 0}',
                           label: '充电分钟',
                         ),
                         _DetailDivider(),
@@ -1324,7 +1805,10 @@ class _StationDetailScreenState extends State<StationDetailScreen> {
                       color: Colors.white,
                       borderRadius: BorderRadius.circular(20),
                       boxShadow: [
-                        BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 20, offset: const Offset(0, 8)),
+                        BoxShadow(
+                            color: Colors.black.withOpacity(0.04),
+                            blurRadius: 20,
+                            offset: const Offset(0, 8)),
                       ],
                     ),
                     child: Column(
@@ -1332,9 +1816,14 @@ class _StationDetailScreenState extends State<StationDetailScreen> {
                       children: [
                         const Row(
                           children: [
-                            Icon(Icons.bolt, color: Color(0xFF007AFF), size: 22),
+                            Icon(Icons.bolt,
+                                color: Color(0xFF007AFF), size: 22),
                             SizedBox(width: 8),
-                            Text('充电桩信息', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black87)),
+                            Text('充电桩信息',
+                                style: TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.black87)),
                           ],
                         ),
                         const SizedBox(height: 16),
@@ -1353,7 +1842,9 @@ class _StationDetailScreenState extends State<StationDetailScreen> {
                                 icon: Icons.event_available,
                                 label: '可用数量',
                                 value: '$availableCount / $totalCount',
-                                color: availableCount > 0 ? Colors.green : Colors.red,
+                                color: availableCount > 0
+                                    ? Colors.green
+                                    : Colors.red,
                               ),
                             ),
                           ],
@@ -1392,7 +1883,10 @@ class _StationDetailScreenState extends State<StationDetailScreen> {
                       color: Colors.white,
                       borderRadius: BorderRadius.circular(20),
                       boxShadow: [
-                        BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 20, offset: const Offset(0, 8)),
+                        BoxShadow(
+                            color: Colors.black.withOpacity(0.04),
+                            blurRadius: 20,
+                            offset: const Offset(0, 8)),
                       ],
                     ),
                     child: Column(
@@ -1405,21 +1899,29 @@ class _StationDetailScreenState extends State<StationDetailScreen> {
                                 color: const Color(0xFF007AFF).withOpacity(0.1),
                                 borderRadius: BorderRadius.circular(12),
                               ),
-                              child: const Icon(Icons.location_on, color: Color(0xFF007AFF), size: 22),
+                              child: const Icon(Icons.location_on,
+                                  color: Color(0xFF007AFF), size: 22),
                             ),
                             const SizedBox(width: 12),
                             Expanded(
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  const Text('地址', style: TextStyle(color: Colors.black54, fontSize: 12)),
+                                  const Text('地址',
+                                      style: TextStyle(
+                                          color: Colors.black54, fontSize: 12)),
                                   const SizedBox(height: 4),
-                                  Text(address, style: const TextStyle(color: Colors.black87, fontSize: 14, fontWeight: FontWeight.w600)),
+                                  Text(address,
+                                      style: const TextStyle(
+                                          color: Colors.black87,
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.w600)),
                                 ],
                               ),
                             ),
                             IconButton(
-                              icon: const Icon(Icons.directions, color: Color(0xFF007AFF)),
+                              icon: const Icon(Icons.directions,
+                                  color: Color(0xFF007AFF)),
                               onPressed: () {},
                             ),
                           ],
@@ -1430,7 +1932,10 @@ class _StationDetailScreenState extends State<StationDetailScreen> {
                           child: ClipRRect(
                             borderRadius: BorderRadius.circular(16),
                             child: AMapWidget(
-                              privacyStatement: const AMapPrivacyStatement(hasContains: true, hasShow: true, hasAgree: true),
+                              privacyStatement: const AMapPrivacyStatement(
+                                  hasContains: true,
+                                  hasShow: true,
+                                  hasAgree: true),
                               apiKey: const AMapApiKey(androidKey: AMAP_KEY),
                               initialCameraPosition: CameraPosition(
                                 target: LatLng(lat, lng),
@@ -1439,7 +1944,8 @@ class _StationDetailScreenState extends State<StationDetailScreen> {
                               markers: {
                                 Marker(
                                   position: LatLng(lat, lng),
-                                  icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
+                                  icon: BitmapDescriptor.defaultMarkerWithHue(
+                                      BitmapDescriptor.hueRed),
                                   infoWindow: InfoWindow(title: name),
                                 ),
                               },
@@ -1486,7 +1992,11 @@ class _StationDetailScreenState extends State<StationDetailScreen> {
                         children: [
                           Icon(Icons.navigation, color: Colors.white, size: 24),
                           SizedBox(width: 8),
-                          Text('立即导航', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
+                          Text('立即导航',
+                              style: TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.white)),
                         ],
                       ),
                     ),
@@ -1499,13 +2009,16 @@ class _StationDetailScreenState extends State<StationDetailScreen> {
                     children: [
                       Expanded(
                         child: OutlinedButton.icon(
-                          onPressed: phone.isNotEmpty ? () => _callStation(phone) : null,
+                          onPressed: phone.isNotEmpty
+                              ? () => _callStation(phone)
+                              : null,
                           icon: const Icon(Icons.call, size: 20),
                           label: const Text('联系站点'),
                           style: OutlinedButton.styleFrom(
                             foregroundColor: const Color(0xFF007AFF),
                             padding: const EdgeInsets.symmetric(vertical: 14),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(28)),
                             side: const BorderSide(color: Color(0xFF007AFF)),
                           ),
                         ),
@@ -1517,13 +2030,20 @@ class _StationDetailScreenState extends State<StationDetailScreen> {
                             widget.onToggleFavorite();
                             setState(() => _isFav = !_isFav);
                           },
-                          icon: Icon(_isFav ? Icons.bookmark : Icons.bookmark_border, size: 20),
+                          icon: Icon(
+                              _isFav ? Icons.bookmark : Icons.bookmark_border,
+                              size: 20),
                           label: Text(_isFav ? '已收藏' : '收藏站点'),
                           style: OutlinedButton.styleFrom(
-                            foregroundColor: _isFav ? Colors.amber : const Color(0xFF007AFF),
+                            foregroundColor:
+                                _isFav ? Colors.amber : const Color(0xFF007AFF),
                             padding: const EdgeInsets.symmetric(vertical: 14),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
-                            side: BorderSide(color: _isFav ? Colors.amber : const Color(0xFF007AFF)),
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(28)),
+                            side: BorderSide(
+                                color: _isFav
+                                    ? Colors.amber
+                                    : const Color(0xFF007AFF)),
                           ),
                         ),
                       ),
@@ -1567,9 +2087,14 @@ class _DetailStatCard extends StatelessWidget {
           child: Icon(icon, color: iconColor, size: 24),
         ),
         const SizedBox(height: 10),
-        Text(value, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Colors.black87)),
+        Text(value,
+            style: const TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 18,
+                color: Colors.black87)),
         const SizedBox(height: 4),
-        Text(label, style: const TextStyle(fontSize: 12, color: Colors.black54)),
+        Text(label,
+            style: const TextStyle(fontSize: 12, color: Colors.black54)),
       ],
     );
   }
@@ -1611,8 +2136,13 @@ class _InfoTile extends StatelessWidget {
         Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(label, style: const TextStyle(fontSize: 11, color: Colors.black54)),
-            Text(value, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Colors.black87)),
+            Text(label,
+                style: const TextStyle(fontSize: 11, color: Colors.black54)),
+            Text(value,
+                style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.black87)),
           ],
         ),
       ],
@@ -1630,14 +2160,15 @@ class NavigationScreen extends StatefulWidget {
   State<NavigationScreen> createState() => _NavigationScreenState();
 }
 
-class _NavigationScreenState extends State<NavigationScreen> with WidgetsBindingObserver {
+class _NavigationScreenState extends State<NavigationScreen>
+    with WidgetsBindingObserver {
   int _currentStepIndex = 0;
   double _userLat = 0;
   double _userLng = 0;
   double _userBearing = 0; // 用户朝向角度
-  bool _isLoading = true;  // 导航页初始为加载中
+  bool _isLoading = true; // 导航页初始为加载中
   bool _isArrived = false;
-  bool _isOffRoute = false;        // 偏航状态
+  bool _isOffRoute = false; // 偏航状态
   bool _offRouteAlertShown = false; // 偏航提示已显示（避免重复弹窗）
   String _errorMsg = "";
   List<dynamic> _steps = [];
@@ -1647,13 +2178,14 @@ class _NavigationScreenState extends State<NavigationScreen> with WidgetsBinding
   double _remainingDistanceKm = 0;
   int _remainingDurationMin = 0;
   double _currentSpeed = 0; // 当前速度 km/h
-  double _gpsAccuracy = 0;   // GPS精度(米)
+  double _gpsAccuracy = 0; // GPS精度(米)
 
   // 地图控制器
   AMapController? _mapController;
 
-  // 位置追踪
-  StreamSubscription<Position>? _positionSubscription;
+  // 位置追踪（高德定位 SDK）
+  AMapFlutterLocation? _aMapLocation;
+  StreamSubscription? _positionSubscription;
 
   // 目的地坐标
   double _destLat = 0;
@@ -1661,9 +2193,6 @@ class _NavigationScreenState extends State<NavigationScreen> with WidgetsBinding
 
   // 到达确认计时
   DateTime? _arrivalConfirmStart;
-
-  // 服务器地址（可配置）
-  String _serverUrl = "https://3aa33e7d.cpolar.io";
 
   // 转向图标映射
   static const Map<String, IconData> _actionIcons = {
@@ -1686,24 +2215,17 @@ class _NavigationScreenState extends State<NavigationScreen> with WidgetsBinding
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _loadServerUrl();
     _parseRouteData();
     _fetchRoute();
     _startLocationTracking();
-  }
-
-  Future<void> _loadServerUrl() async {
-    final prefs = await SharedPreferences.getInstance();
-    final saved = prefs.getString('server_url');
-    if (saved != null && saved.isNotEmpty) {
-      setState(() => _serverUrl = saved);
-    }
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _positionSubscription?.cancel();
+    _aMapLocation?.stopLocation();
+    _aMapLocation?.destroy();
     super.dispose();
   }
 
@@ -1725,38 +2247,57 @@ class _NavigationScreenState extends State<NavigationScreen> with WidgetsBinding
   }
 
   void _startLocationTracking() {
-    _positionSubscription = Geolocator.getPositionStream(
-      locationSettings: const LocationSettings(
-        accuracy: LocationAccuracy.high,
-        distanceFilter: 10, // 每移动10米更新一次
-      ),
-    ).listen(
-      (Position position) {
+    // 导航用高德定位，Hight_Accuracy 模式含道路吸附，适合导航
+    _aMapLocation = AMapFlutterLocation();
+    _aMapLocation!.setLocationOption(AMapLocationOption(
+      onceLocation: false,
+      locationMode: AMapLocationMode.Hight_Accuracy,
+      needAddress: false,
+      locationInterval: 2000, // 每 2 秒更新一次
+    ));
+
+    _positionSubscription = _aMapLocation!.onLocationChanged().listen(
+      (result) {
         if (_isArrived) return;
 
-        // GPS精度过滤：忽略精度过差的定位
-        if (position.accuracy > _GPS_ACCURACY_THRESHOLD) return;
+        final errCode = result['errorCode']?.toString();
+        if (errCode != null && errCode != '0') return;
 
-        // 检查有效值
-        final speed = position.speed.isNaN || position.speed < 0 ? 0.0 : position.speed;
-        final heading = position.heading.isNaN || position.heading < 0 ? 0.0 : position.heading;
+        final lat = (result['latitude'] as num?)?.toDouble();
+        final lng = (result['longitude'] as num?)?.toDouble();
+        if (lat == null || lng == null) return;
+
+        // 过滤无效坐标
+        if (lat.abs() < 0.01 || lng.abs() < 0.01) return;
+
+        final accuracy =
+            (result['accuracy'] as num?)?.toDouble() ?? 0;
+        // GPS精度过滤：忽略精度过差的定位
+        if (accuracy > _GPS_ACCURACY_THRESHOLD) return;
+
+        final speed =
+            (result['speed'] as num?)?.toDouble() ?? 0;
+        final bearing =
+            (result['bearing'] as num?)?.toDouble() ?? 0;
 
         setState(() {
-          _userLat = position.latitude;
-          _userLng = position.longitude;
-          _userBearing = heading;
+          _userLat = lat;
+          _userLng = lng;
+          _userBearing = bearing;
           _currentSpeed = speed * 3.6; // m/s 转 km/h
-          _gpsAccuracy = position.accuracy;
+          _gpsAccuracy = accuracy;
         });
 
         // 检查偏航
-        _checkDeviation(position.latitude, position.longitude);
-        _updateNavigation(position.latitude, position.longitude, heading);
+        _checkDeviation(lat, lng);
+        _updateNavigation(lat, lng, bearing);
       },
       onError: (e) {
-        debugPrint('Location error: $e');
+        debugPrint('AMap location error: $e');
       },
     );
+
+    _aMapLocation!.startLocation();
   }
 
   void _updateNavigation(double lat, double lng, double bearing) {
@@ -1767,10 +2308,13 @@ class _NavigationScreenState extends State<NavigationScreen> with WidgetsBinding
 
     // 增强到达判断：距离 < 100m 且 GPS精度 < 25m 且速度 < 5km/h 持续3秒
     final distMeters = routeInfo['distanceKm'] * 1000;
-    if (distMeters < _ARRIVAL_DISTANCE_METERS && _gpsAccuracy < _GPS_ACCURACY_THRESHOLD && _currentSpeed < _ARRIVAL_SPEED_THRESHOLD) {
+    if (distMeters < _ARRIVAL_DISTANCE_METERS &&
+        _gpsAccuracy < _GPS_ACCURACY_THRESHOLD &&
+        _currentSpeed < _ARRIVAL_SPEED_THRESHOLD) {
       if (_arrivalConfirmStart == null) {
         _arrivalConfirmStart = DateTime.now();
-      } else if (DateTime.now().difference(_arrivalConfirmStart!).inSeconds >= _ARRIVAL_CONFIRM_SECONDS) {
+      } else if (DateTime.now().difference(_arrivalConfirmStart!).inSeconds >=
+          _ARRIVAL_CONFIRM_SECONDS) {
         setState(() {
           _isArrived = true;
           _remainingDistanceKm = 0;
@@ -1801,7 +2345,8 @@ class _NavigationScreenState extends State<NavigationScreen> with WidgetsBinding
     for (int i = 0; i < _polyline.length - 1; i++) {
       final p1 = _polyline[i];
       final p2 = _polyline[i + 1];
-      final dist = _pointToSegmentDistance(lat, lng, p1[0], p1[1], p2[0], p2[1]);
+      final dist =
+          _pointToSegmentDistance(lat, lng, p1[0], p1[1], p2[0], p2[1]);
       if (dist < minDistToRoute) {
         minDistToRoute = dist;
       }
@@ -1872,7 +2417,8 @@ class _NavigationScreenState extends State<NavigationScreen> with WidgetsBinding
   }
 
   /// 计算沿着路线从当前位置到目的地的剩余距离和时间
-  Map<String, dynamic> _calculateRemainingRouteDistance(double lat, double lng) {
+  Map<String, dynamic> _calculateRemainingRouteDistance(
+      double lat, double lng) {
     if (_polyline.isEmpty) {
       return {'distanceKm': 0.0, 'durationMin': 0, 'stepIndex': 0};
     }
@@ -1884,7 +2430,8 @@ class _NavigationScreenState extends State<NavigationScreen> with WidgetsBinding
     for (int i = 0; i < _polyline.length - 1; i++) {
       final p1 = _polyline[i];
       final p2 = _polyline[i + 1];
-      final dist = _pointToSegmentDistance(lat, lng, p1[0], p1[1], p2[0], p2[1]);
+      final dist =
+          _pointToSegmentDistance(lat, lng, p1[0], p1[1], p2[0], p2[1]);
       if (dist < minDist) {
         minDist = dist;
         nearestIdx = i;
@@ -1895,23 +2442,32 @@ class _NavigationScreenState extends State<NavigationScreen> with WidgetsBinding
     double remainingDistMeters = 0;
     for (int i = nearestIdx; i < _polyline.length - 1; i++) {
       remainingDistMeters += _calculateDistance(
-        _polyline[i][0], _polyline[i][1],
-        _polyline[i + 1][0], _polyline[i + 1][1],
-      ) * 1000; // 转米
+            _polyline[i][0],
+            _polyline[i][1],
+            _polyline[i + 1][0],
+            _polyline[i + 1][1],
+          ) *
+          1000; // 转米
     }
 
     // 确保剩余距离有效
-    remainingDistMeters = remainingDistMeters.isNaN || remainingDistMeters < 0 ? _totalDistanceKm * 1000 : remainingDistMeters;
+    remainingDistMeters = remainingDistMeters.isNaN || remainingDistMeters < 0
+        ? _totalDistanceKm * 1000
+        : remainingDistMeters;
 
     // 精确计算当前 step 索引：用 polyline 累计距离匹配 step
     int stepIndex = _calculateStepIndexByDistance(nearestIdx);
 
     // 计算剩余时间
-    double effectiveSpeed = _currentSpeed > 5 ? _currentSpeed : (_totalDistanceKm / (_totalDurationMin / 60));
-    effectiveSpeed = effectiveSpeed.isNaN || effectiveSpeed <= 0 ? 30.0 : effectiveSpeed;
+    double effectiveSpeed = _currentSpeed > 5
+        ? _currentSpeed
+        : (_totalDistanceKm / (_totalDurationMin / 60));
+    effectiveSpeed =
+        effectiveSpeed.isNaN || effectiveSpeed <= 0 ? 30.0 : effectiveSpeed;
 
     double remainingMinRaw = remainingDistMeters / 1000 / effectiveSpeed * 60;
-    if (remainingMinRaw.isNaN || remainingMinRaw < 0) remainingMinRaw = _totalDurationMin.toDouble();
+    if (remainingMinRaw.isNaN || remainingMinRaw < 0)
+      remainingMinRaw = _totalDurationMin.toDouble();
     final remainingMin = remainingMinRaw.ceil().clamp(1, 999);
 
     return {
@@ -1929,8 +2485,10 @@ class _NavigationScreenState extends State<NavigationScreen> with WidgetsBinding
     double traveledDistKm = 0;
     for (int i = 0; i < nearestPolylineIdx; i++) {
       traveledDistKm += _calculateDistanceKm(
-        _polyline[i][0], _polyline[i][1],
-        _polyline[i + 1][0], _polyline[i + 1][1],
+        _polyline[i][0],
+        _polyline[i][1],
+        _polyline[i + 1][0],
+        _polyline[i + 1][1],
       );
     }
     // 加上最近路段的部分距离
@@ -1953,7 +2511,8 @@ class _NavigationScreenState extends State<NavigationScreen> with WidgetsBinding
     return _steps.length - 1;
   }
 
-  double _pointToSegmentDistance(double px, double py, double x1, double y1, double x2, double y2) {
+  double _pointToSegmentDistance(
+      double px, double py, double x1, double y1, double x2, double y2) {
     final dx = x2 - x1;
     final dy = y2 - y1;
     final lengthSq = dx * dx + dy * dy;
@@ -1972,25 +2531,27 @@ class _NavigationScreenState extends State<NavigationScreen> with WidgetsBinding
   }
 
   /// Haversine 距离计算（公里）
-  double _calculateDistance(double lat1, double lng1, double lat2, double lng2) {
+  double _calculateDistance(
+      double lat1, double lng1, double lat2, double lng2) {
     const double earthRadius = 6371; // 公里
     final dLat = (lat2 - lat1) * math.pi / 180;
     final dLng = (lng2 - lng1) * math.pi / 180;
     final a = math.sin(dLat / 2) * math.sin(dLat / 2) +
-        math.cos(lat1 * math.pi / 180) * math.cos(lat2 * math.pi / 180) *
-        math.sin(dLng / 2) * math.sin(dLng / 2);
+        math.cos(lat1 * math.pi / 180) *
+            math.cos(lat2 * math.pi / 180) *
+            math.sin(dLng / 2) *
+            math.sin(dLng / 2);
     final c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a));
     return earthRadius * c;
   }
 
   /// 距离计算（公里），直接调用
-  double _calculateDistanceKm(double lat1, double lng1, double lat2, double lng2) {
+  double _calculateDistanceKm(
+      double lat1, double lng1, double lat2, double lng2) {
     return _calculateDistance(lat1, lng1, lat2, lng2);
   }
 
   Future<void> _fetchRoute() async {
-    // 确保服务器地址已加载完成
-    await _loadServerUrl();
     try {
       setState(() {
         _isLoading = true;
@@ -2005,58 +2566,41 @@ class _NavigationScreenState extends State<NavigationScreen> with WidgetsBinding
         return;
       }
 
-      final client = HttpClient();
-      final request = await client.postUrl(
-        Uri.parse('$_serverUrl/api/route'),
-      );
-      request.headers.set('content-type', 'application/json');
-
-      final payload = jsonEncode({
+      // 使用 ApiClient 请求导航路线
+      final payload = {
         "origin_lat": _userLat,
         "origin_lng": _userLng,
         "dest_lat": _destLat,
         "dest_lng": _destLng,
-      });
+      };
       debugPrint('导航请求payload: $payload');
-      request.write(payload);
 
-      // 10秒超时
-      final response = await request.close().timeout(
-        const Duration(seconds: 10),
-        onTimeout: () => throw TimeoutException('导航请求超时'),
-      );
-      final responseBody = await response.transform(utf8.decoder).join();
-      debugPrint('导航响应: $responseBody');
+      final resp = await ApiClient().post('/api/route', data: payload);
+      final data = resp.data;
+      debugPrint('导航响应: $data');
 
-      if (response.statusCode == 200) {
-        final data = jsonDecode(responseBody);
-        if (data['code'] == 200) {
-          final routeData = data['data'];
-          setState(() {
-            _steps = routeData['steps'] ?? [];
-            _polyline = List<List<double>>.from(
-              (routeData['polyline'] as List?)?.map(
-                (e) => List<double>.from(e),
-              ) ?? [],
-            );
-            _totalDistanceKm = (routeData['distance_km'] ?? 0).toDouble();
-            _totalDurationMin = routeData['duration_min'] ?? 0;
-            _remainingDistanceKm = _totalDistanceKm;
-            _remainingDurationMin = _totalDurationMin;
-            _isLoading = false;
-          });
+      if (resp.statusCode == 200 && data['code'] == 200) {
+        final routeData = data['data'];
+        setState(() {
+          _steps = routeData['steps'] ?? [];
+          _polyline = List<List<double>>.from(
+            (routeData['polyline'] as List?)?.map(
+                  (e) => List<double>.from(e),
+                ) ??
+                [],
+          );
+          _totalDistanceKm = (routeData['distance_km'] ?? 0).toDouble();
+          _totalDurationMin = routeData['duration_min'] ?? 0;
+          _remainingDistanceKm = _totalDistanceKm;
+          _remainingDurationMin = _totalDurationMin;
+          _isLoading = false;
+        });
 
-          // 用当前位置初始化导航
-          _updateNavigation(_userLat, _userLng, 0);
-        } else {
-          setState(() {
-            _errorMsg = data['message'] ?? '路线规划失败';
-            _isLoading = false;
-          });
-        }
+        // 用当前位置初始化导航
+        _updateNavigation(_userLat, _userLng, 0);
       } else {
         setState(() {
-          _errorMsg = "请求失败: ${response.statusCode}";
+          _errorMsg = data['message'] ?? '路线规划失败';
           _isLoading = false;
         });
       }
@@ -2091,7 +2635,8 @@ class _NavigationScreenState extends State<NavigationScreen> with WidgetsBinding
               ),
               apiKey: const AMapApiKey(androidKey: AMAP_KEY),
               initialCameraPosition: CameraPosition(
-                target: LatLng(_destLat > 0 ? _destLat : _userLat, _destLng > 0 ? _destLng : _userLng),
+                target: LatLng(_destLat > 0 ? _destLat : _userLat,
+                    _destLng > 0 ? _destLng : _userLng),
                 zoom: 15,
               ),
               myLocationStyleOptions: MyLocationStyleOptions(true),
@@ -2100,14 +2645,16 @@ class _NavigationScreenState extends State<NavigationScreen> with WidgetsBinding
                 if (_destLat > 0 && _destLng > 0)
                   Marker(
                     position: LatLng(_destLat, _destLng),
-                    icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
+                    icon: BitmapDescriptor.defaultMarkerWithHue(
+                        BitmapDescriptor.hueRed),
                     infoWindow: InfoWindow(title: stationName),
                   ),
               },
               polylines: _polyline.isNotEmpty
                   ? {
                       Polyline(
-                        points: _polyline.map((p) => LatLng(p[0], p[1])).toList(),
+                        points:
+                            _polyline.map((p) => LatLng(p[0], p[1])).toList(),
                         width: 12,
                         color: const Color(0xFF007AFF),
                       ),
@@ -2155,7 +2702,8 @@ class _NavigationScreenState extends State<NavigationScreen> with WidgetsBinding
                             color: Colors.white.withOpacity(0.2),
                             shape: BoxShape.circle,
                           ),
-                          child: const Icon(Icons.close, color: Colors.white, size: 20),
+                          child: const Icon(Icons.close,
+                              color: Colors.white, size: 20),
                         ),
                       ),
                       const SizedBox(width: 12),
@@ -2166,7 +2714,8 @@ class _NavigationScreenState extends State<NavigationScreen> with WidgetsBinding
                           children: [
                             Row(
                               children: [
-                                const Icon(Icons.trip_origin, color: Color(0xFF00C853), size: 14),
+                                const Icon(Icons.trip_origin,
+                                    color: Color(0xFF00C853), size: 14),
                                 const SizedBox(width: 6),
                                 Expanded(
                                   child: Text(
@@ -2198,7 +2747,8 @@ class _NavigationScreenState extends State<NavigationScreen> with WidgetsBinding
                       const SizedBox(width: 8),
                       // 路线概览按钮
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 8),
                         decoration: BoxDecoration(
                           color: Colors.white.withOpacity(0.15),
                           borderRadius: BorderRadius.circular(20),
@@ -2208,7 +2758,9 @@ class _NavigationScreenState extends State<NavigationScreen> with WidgetsBinding
                           children: [
                             Icon(Icons.route, color: Colors.white, size: 18),
                             SizedBox(width: 4),
-                            Text('路线', style: TextStyle(color: Colors.white, fontSize: 13)),
+                            Text('路线',
+                                style: TextStyle(
+                                    color: Colors.white, fontSize: 13)),
                           ],
                         ),
                       ),
@@ -2228,7 +2780,9 @@ class _NavigationScreenState extends State<NavigationScreen> with WidgetsBinding
                             ),
                             child: FractionallySizedBox(
                               alignment: Alignment.centerLeft,
-                              widthFactor: 1 - (_remainingDistanceKm / _totalDistanceKm).clamp(0.0, 1.0),
+                              widthFactor: 1 -
+                                  (_remainingDistanceKm / _totalDistanceKm)
+                                      .clamp(0.0, 1.0),
                               child: Container(
                                 decoration: BoxDecoration(
                                   color: const Color(0xFF00C853),
@@ -2241,7 +2795,8 @@ class _NavigationScreenState extends State<NavigationScreen> with WidgetsBinding
                         const SizedBox(width: 12),
                         Text(
                           '${((1 - _remainingDistanceKm / _totalDistanceKm) * 100).toStringAsFixed(0)}%',
-                          style: const TextStyle(color: Colors.white70, fontSize: 12),
+                          style: const TextStyle(
+                              color: Colors.white70, fontSize: 12),
                         ),
                       ],
                     ),
@@ -2257,7 +2812,8 @@ class _NavigationScreenState extends State<NavigationScreen> with WidgetsBinding
               top: MediaQuery.of(context).padding.top + 60,
               right: 16,
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                 decoration: BoxDecoration(
                   color: Colors.black.withOpacity(0.6),
                   borderRadius: BorderRadius.circular(8),
@@ -2268,10 +2824,16 @@ class _NavigationScreenState extends State<NavigationScreen> with WidgetsBinding
                     const Icon(Icons.speed, color: Colors.white, size: 20),
                     const SizedBox(height: 2),
                     Text(
-                      _currentSpeed > 1 ? _currentSpeed.toStringAsFixed(0) : '--',
-                      style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+                      _currentSpeed > 1
+                          ? _currentSpeed.toStringAsFixed(0)
+                          : '--',
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold),
                     ),
-                    const Text('km/h', style: TextStyle(color: Colors.white70, fontSize: 10)),
+                    const Text('km/h',
+                        style: TextStyle(color: Colors.white70, fontSize: 10)),
                   ],
                 ),
               ),
@@ -2284,7 +2846,8 @@ class _NavigationScreenState extends State<NavigationScreen> with WidgetsBinding
             child: GestureDetector(
               onTap: _handleDeviation,
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                 decoration: BoxDecoration(
                   color: Colors.black.withOpacity(0.6),
                   borderRadius: BorderRadius.circular(20),
@@ -2294,7 +2857,8 @@ class _NavigationScreenState extends State<NavigationScreen> with WidgetsBinding
                   children: [
                     Icon(Icons.replay, color: Colors.white, size: 16),
                     SizedBox(width: 4),
-                    Text('偏航重算', style: TextStyle(color: Colors.white, fontSize: 12)),
+                    Text('偏航重算',
+                        style: TextStyle(color: Colors.white, fontSize: 12)),
                   ],
                 ),
               ),
@@ -2319,9 +2883,11 @@ class _NavigationScreenState extends State<NavigationScreen> with WidgetsBinding
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Icon(Icons.error_outline, size: 48, color: Colors.red),
+                      const Icon(Icons.error_outline,
+                          size: 48, color: Colors.red),
                       const SizedBox(height: 16),
-                      Text(_errorMsg, style: const TextStyle(color: Colors.red)),
+                      Text(_errorMsg,
+                          style: const TextStyle(color: Colors.red)),
                       const SizedBox(height: 16),
                       ElevatedButton(
                         onPressed: () {
@@ -2361,17 +2927,22 @@ class _NavigationScreenState extends State<NavigationScreen> with WidgetsBinding
                             color: Color(0xFF34C759),
                             shape: BoxShape.circle,
                           ),
-                          child: const Icon(Icons.check, color: Colors.white, size: 48),
+                          child: const Icon(Icons.check,
+                              color: Colors.white, size: 48),
                         ),
                         const SizedBox(height: 24),
                         const Text(
                           '已到达目的地',
-                          style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.black87),
+                          style: TextStyle(
+                              fontSize: 24,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.black87),
                         ),
                         const SizedBox(height: 8),
                         Text(
                           stationName,
-                          style: const TextStyle(fontSize: 16, color: Colors.black54),
+                          style: const TextStyle(
+                              fontSize: 16, color: Colors.black54),
                           textAlign: TextAlign.center,
                         ),
                         const SizedBox(height: 24),
@@ -2379,10 +2950,16 @@ class _NavigationScreenState extends State<NavigationScreen> with WidgetsBinding
                           onPressed: () => Navigator.pop(context),
                           style: ElevatedButton.styleFrom(
                             backgroundColor: const Color(0xFF007AFF),
-                            padding: const EdgeInsets.symmetric(horizontal: 48, vertical: 14),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 48, vertical: 14),
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(28)),
                           ),
-                          child: const Text('完成导航', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
+                          child: const Text('完成导航',
+                              style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.white)),
                         ),
                       ],
                     ),
@@ -2392,7 +2969,10 @@ class _NavigationScreenState extends State<NavigationScreen> with WidgetsBinding
             ),
 
           // 底部引导卡片
-          if (!_isLoading && _errorMsg.isEmpty && _steps.isNotEmpty && !_isArrived)
+          if (!_isLoading &&
+              _errorMsg.isEmpty &&
+              _steps.isNotEmpty &&
+              !_isArrived)
             Positioned(
               bottom: 0,
               left: 0,
@@ -2469,7 +3049,10 @@ class _NavigationScreenState extends State<NavigationScreen> with WidgetsBinding
                       const SizedBox(height: 2),
                       Text(
                         action,
-                        style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600),
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600),
                       ),
                     ],
                   ),
@@ -2508,7 +3091,8 @@ class _NavigationScreenState extends State<NavigationScreen> with WidgetsBinding
                           ),
                           const Spacer(),
                           Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 10, vertical: 4),
                             decoration: BoxDecoration(
                               color: Colors.grey.shade100,
                               borderRadius: BorderRadius.circular(12),
@@ -2516,11 +3100,13 @@ class _NavigationScreenState extends State<NavigationScreen> with WidgetsBinding
                             child: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                const Icon(Icons.schedule, size: 14, color: Colors.black45),
+                                const Icon(Icons.schedule,
+                                    size: 14, color: Colors.black45),
                                 const SizedBox(width: 4),
                                 Text(
                                   '约${remainingTime}分钟',
-                                  style: const TextStyle(fontSize: 12, color: Colors.black54),
+                                  style: const TextStyle(
+                                      fontSize: 12, color: Colors.black54),
                                 ),
                               ],
                             ),
@@ -2542,12 +3128,16 @@ class _NavigationScreenState extends State<NavigationScreen> with WidgetsBinding
                         const SizedBox(height: 6),
                         Row(
                           children: [
-                            const Icon(Icons.location_on, size: 14, color: Color(0xFF007AFF)),
+                            const Icon(Icons.location_on,
+                                size: 14, color: Color(0xFF007AFF)),
                             const SizedBox(width: 4),
                             Expanded(
                               child: Text(
                                 road,
-                                style: const TextStyle(fontSize: 13, color: Color(0xFF007AFF), fontWeight: FontWeight.w500),
+                                style: const TextStyle(
+                                    fontSize: 13,
+                                    color: Color(0xFF007AFF),
+                                    fontWeight: FontWeight.w500),
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                               ),
@@ -2597,7 +3187,8 @@ class _NavigationScreenState extends State<NavigationScreen> with WidgetsBinding
                         ),
                         Text(
                           '${nextStep['action'] ?? '直行'}至${nextStep['road'] ?? '目的地'}',
-                          style: const TextStyle(fontSize: 13, color: Colors.black54),
+                          style: const TextStyle(
+                              fontSize: 13, color: Colors.black54),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
@@ -2608,7 +3199,10 @@ class _NavigationScreenState extends State<NavigationScreen> with WidgetsBinding
                     nextStep['distance_km'] < 1
                         ? '${((nextStep['distance_km'] ?? 0) * 1000).toStringAsFixed(0)}米'
                         : '${(nextStep['distance_km'] ?? 0).toStringAsFixed(1)}公里',
-                    style: const TextStyle(fontSize: 13, color: Colors.black45, fontWeight: FontWeight.w600),
+                    style: const TextStyle(
+                        fontSize: 13,
+                        color: Colors.black45,
+                        fontWeight: FontWeight.w600),
                   ),
                 ],
               ),
@@ -2619,10 +3213,9 @@ class _NavigationScreenState extends State<NavigationScreen> with WidgetsBinding
   }
 }
 
-// ============== 我的页面 ==============
-class MinePage extends StatelessWidget {
+// ============== 我的页面（支持游客/登录双模式） ==============
+class MinePage extends StatefulWidget {
   final Set<String> favorites;
-  final List<dynamic> recommendations;
   final double userLat;
   final double userLng;
   final String carName;
@@ -2635,7 +3228,6 @@ class MinePage extends StatelessWidget {
   const MinePage({
     super.key,
     required this.favorites,
-    required this.recommendations,
     required this.userLat,
     required this.userLng,
     required this.carName,
@@ -2645,6 +3237,65 @@ class MinePage extends StatelessWidget {
     required this.history,
     required this.onLogout,
   });
+
+  @override
+  State<MinePage> createState() => _MinePageState();
+}
+
+class _MinePageState extends State<MinePage> {
+  final AuthService _auth = AuthService();
+  bool _isLoggedIn = false;
+  String _displayName = '';
+  String _myCarName = '';
+  double _mySoc = 48.0;
+
+  @override
+  void initState() {
+    super.initState();
+    _refreshAll();
+  }
+
+  /// 刷新所有状态：先从缓存秒读，再异步网络更新
+  Future<void> _refreshAll() async {
+    // 1. 本地缓存秒读（SharedPreferences 在本地，瞬间完成）
+    final prefs = await SharedPreferences.getInstance();
+    final uid = prefs.getInt('user_id');
+    final nickname = prefs.getString('nickname');
+    final username = prefs.getString('username');
+    final carSettings = await DataRepository().loadCarSettings();
+    if (mounted) {
+      setState(() {
+        _isLoggedIn = uid != null && uid > 0;
+        _displayName = (nickname?.isNotEmpty == true)
+            ? nickname!
+            : (username ?? '');
+        _myCarName = carSettings['car_name']?.toString() ?? widget.carName;
+        _mySoc = (carSettings['current_soc'] ?? widget.soc).toDouble();
+      });
+    }
+
+    // 2. 异步网络更新（静默，不影响已显示的内容）
+    final loggedIn = await _auth.isLoggedIn();
+    if (!loggedIn || !mounted) return;
+    final user = await _auth.getCurrentUser();
+    if (user != null) {
+      final carSettings2 = await DataRepository().loadCarSettings();
+      setState(() {
+        _isLoggedIn = true;
+        _displayName = (user['nickname']?.toString().isNotEmpty == true)
+            ? user['nickname']
+            : (user['username']?.toString() ?? '');
+        _myCarName = carSettings2['car_name']?.toString() ?? _myCarName;
+        _mySoc = (carSettings2['current_soc'] ?? _mySoc).toDouble();
+      });
+    }
+  }
+
+  /// 登录成功后的回调：刷新本页状态并通知父页面重建
+  void _onLoginSuccess() {
+    _refreshAll();
+    widget.onLogout();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -2657,81 +3308,136 @@ class MinePage extends StatelessWidget {
           icon: const Icon(Icons.arrow_back, color: Colors.black87),
           onPressed: () => Navigator.pop(context),
         ),
-        title: const Text('我的', style: TextStyle(color: Colors.black87, fontWeight: FontWeight.w600)),
+        title: const Text('我的',
+            style:
+                TextStyle(color: Colors.black87, fontWeight: FontWeight.w600)),
       ),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          Container(
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(16),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.06),
-                  blurRadius: 12,
-                  offset: const Offset(0, 4),
-                ),
-              ],
-            ),
-            child: Row(
-              children: [
-                CircleAvatar(
-                  radius: 30,
-                  backgroundColor: Color(0xFF007AFF),
-                  child: const Icon(Icons.person, color: Colors.white, size: 32),
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text('账号设置', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black87)),
-                      const SizedBox(height: 4),
-                      Text('$carName · ${soc.toInt()}%', style: const TextStyle(fontSize: 14, color: Colors.black54)),
-                    ],
-                  ),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.chevron_right, color: Colors.grey),
-                  onPressed: () {
-                    Navigator.push(context, MaterialPageRoute(builder: (_) => ProfilePage(onLogout: onLogout)));
-                  },
-                ),
-              ],
-            ),
-          ),
+          // ---- 用户信息卡片（游客/登录不同展示） ----
+          _buildUserCard(context),
           const SizedBox(height: 24),
           _buildListTile(Icons.history, '历史记录', context, onTap: () {
-            Navigator.push(context, MaterialPageRoute(builder: (_) => HistoryListPage(history: history, userLat: userLat, userLng: userLng)));
+            Navigator.push(
+                context,
+                MaterialPageRoute(
+                    builder: (_) => HistoryListPage(
+                        history: widget.history,
+                        favorites: widget.favorites,
+                        userLat: widget.userLat,
+                        userLng: widget.userLng)));
           }),
           _buildListTile(Icons.star, '收藏站点', context, onTap: () {
-            Navigator.push(context, MaterialPageRoute(builder: (_) => FavoritesListPage(
-              favorites: favorites,
-              recommendations: recommendations,
-              userLat: userLat,
-              userLng: userLng,
-              carName: carName,
-              soc: soc,
-            )));
-          }),
-          _buildListTile(Icons.person, '账号设置', context, onTap: () {
-            Navigator.push(context, MaterialPageRoute(builder: (_) => ProfilePage(onLogout: onLogout)));
-          }),
-          _buildListTile(Icons.location_on, '常用充电站', context, onTap: () {
-            Navigator.push(context, MaterialPageRoute(builder: (_) => FrequentStationsPage(history: history, userLat: userLat, userLng: userLng)));
+            Navigator.push(
+                context,
+                MaterialPageRoute(
+                    builder: (_) => FavoritesListPage(
+                          favorites: widget.favorites,
+                          userLat: widget.userLat,
+                          userLng: widget.userLng,
+                          carName: widget.carName,
+                          soc: widget.soc,
+                        )));
           }),
           _buildDivider(),
           _buildListTile(Icons.settings, '设置', context, onTap: () {
-            Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsPage()));
+            Navigator.push(
+                context,
+                MaterialPageRoute(
+                    builder: (_) => SettingsPage(
+                          isLoggedIn: _isLoggedIn,
+                          onLogout: () async {
+                            await _auth.logout();
+                            setState(() => _isLoggedIn = false);
+                            widget.onLogout();
+                          },
+                        )));
           }),
         ],
       ),
     );
   }
 
-  Widget _buildListTile(IconData icon, String title, BuildContext context, {VoidCallback? onTap}) {
+  /// 构建用户信息卡片：未登录显示登录引导，已登录显示用户信息
+  Widget _buildUserCard(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.06),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          CircleAvatar(
+            radius: 30,
+            backgroundColor: const Color(0xFF007AFF),
+            child: Icon(
+              _isLoggedIn ? Icons.person : Icons.person_outline,
+              color: Colors.white,
+              size: 32,
+            ),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  _isLoggedIn ? _displayName : '游客模式',
+                  style: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.black87),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  _isLoggedIn
+                      ? '$_myCarName · ${_mySoc.toInt()}%'
+                      : '登录后同步数据到云端',
+                  style: TextStyle(
+                      fontSize: 14,
+                      color: _isLoggedIn
+                          ? Colors.black54
+                          : Colors.grey.shade500),
+                ),
+              ],
+            ),
+          ),
+          if (!_isLoggedIn)
+            ElevatedButton(
+              onPressed: () {
+                Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                        builder: (_) =>
+                            LoginPage(onLoginSuccess: _onLoginSuccess)));
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF007AFF),
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(20)),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              ),
+              child: const Text('登录',
+                  style: TextStyle(fontWeight: FontWeight.w600)),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildListTile(IconData icon, String title, BuildContext context,
+      {VoidCallback? onTap}) {
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       decoration: BoxDecoration(
@@ -2748,8 +3454,10 @@ class MinePage extends StatelessWidget {
           ),
           child: Icon(icon, color: const Color(0xFF007AFF), size: 20),
         ),
-        title: Text(title, style: const TextStyle(fontSize: 15, color: Colors.black87)),
-        trailing: const Icon(Icons.chevron_right, color: Colors.grey, size: 20),
+        title: Text(title,
+            style: const TextStyle(fontSize: 15, color: Colors.black87)),
+        trailing:
+            const Icon(Icons.chevron_right, color: Colors.grey, size: 20),
         onTap: onTap ?? () {},
       ),
     );
@@ -2764,24 +3472,174 @@ class MinePage extends StatelessWidget {
 }
 
 // ============== 收藏站点列表页 ==============
-class FavoritesListPage extends StatelessWidget {
+// ============== 收藏站点页面（重构版） ==============
+// 不再依赖当前推荐列表过滤，而是直接从后端获取站点详情
+class FavoritesListPage extends StatefulWidget {
   final Set<String> favorites;
-  final List<dynamic> recommendations;
   final double userLat;
   final double userLng;
   final String carName;
   final double soc;
 
-  const FavoritesListPage({super.key, required this.favorites, required this.recommendations, required this.userLat, required this.userLng, required this.carName, required this.soc});
+  const FavoritesListPage({
+    super.key,
+    required this.favorites,
+    required this.userLat,
+    required this.userLng,
+    required this.carName,
+    required this.soc,
+  });
+
+  @override
+  State<FavoritesListPage> createState() => _FavoritesListPageState();
+}
+
+class _FavoritesListPageState extends State<FavoritesListPage> {
+  /// 站点信息缓存：stationId → 完整站点对象（名称、类型、可用桩数、电价等）
+  Map<String, Map<String, dynamic>> _stationCache = {};
+  /// 是否正在加载站点详情列表（页面级加载状态）
+  bool _isLoadingCache = false;
+  /// 正在加载详情的站点 ID（点击进入详情页时的加载状态）
+  String? _loadingStationId;
+  /// 当前收藏集合（用于详情页返回后刷新）
+  late Set<String> _favorites;
+
+  @override
+  void initState() {
+    super.initState();
+    _favorites = Set<String>.from(widget.favorites);
+    _loadStationCache();
+  }
+
+  @override
+  void didUpdateWidget(FavoritesListPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.favorites != widget.favorites) {
+      _favorites = Set<String>.from(widget.favorites);
+      _loadStationCache();
+    }
+  }
+
+  /// 加载收藏站点的完整信息用于列表展示
+  /// 1. 先从本地历史记录快速加载（秒显基本信息）
+  /// 2. 再并行拉取后端完整数据（类型、桩数、电价等）
+  Future<void> _loadStationCache() async {
+    // 第一步：从历史记录加载基本信息作为秒显缓存
+    final history = await LocalStorage.loadHistory();
+    final cache = <String, Map<String, dynamic>>{};
+    for (final entry in history) {
+      final station = entry['station'] as Map<String, dynamic>?;
+      final stationId = entry['station_id']?.toString() ?? '';
+      if (station != null &&
+          stationId.isNotEmpty &&
+          _favorites.contains(stationId) &&
+          !cache.containsKey(stationId)) {
+        cache[stationId] = station;
+      }
+    }
+    if (mounted) setState(() => _stationCache = cache);
+
+    // 第二步：并行从后端拉取所有收藏站点的完整数据
+    if (_favorites.isEmpty) return;
+    setState(() => _isLoadingCache = true);
+
+    final results = await Future.wait(
+      _favorites.map((stationId) =>
+          DataRepository().fetchStationDetail(stationId).then((detail) {
+            // 从响应中提取 station 对象（不含距离等计算字段）
+            if (detail != null && detail['station'] is Map<String, dynamic>) {
+              return MapEntry(stationId, detail['station'] as Map<String, dynamic>);
+            }
+            return null;
+          }).catchError((_) => null)),
+    );
+
+    // 将后端数据合并到缓存（后端数据更完整，覆盖历史记录中的残数据）
+    for (final result in results) {
+      if (result is MapEntry<String, Map<String, dynamic>>) {
+        cache[result.key] = result.value;
+      }
+    }
+
+    if (mounted) {
+      setState(() {
+        _stationCache = cache;
+        _isLoadingCache = false;
+      });
+    }
+  }
+
+  /// 点击收藏项：从后端获取完整详情，然后导航到详情页
+  Future<void> _openStationDetail(String stationId) async {
+    setState(() => _loadingStationId = stationId);
+
+    // 从后端获取站点完整数据（含距离计算）
+    final detail = await DataRepository().fetchStationDetail(
+      stationId,
+      lat: widget.userLat,
+      lng: widget.userLng,
+    );
+
+    if (!mounted) return;
+    setState(() => _loadingStationId = null);
+
+    // 后端不可用时，尝试用本地缓存数据兜底
+    final dataToUse = detail ?? _buildFallbackData(stationId);
+    if (dataToUse == null) {
+      _showErrorSnackBar('无法获取站点信息，请检查网络连接');
+      return;
+    }
+
+    final isFav = _favorites.contains(stationId);
+
+    // 导航到详情页，返回后刷新收藏状态
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => StationDetailScreen(
+          data: dataToUse,
+          userLat: widget.userLat,
+          userLng: widget.userLng,
+          isFavorite: isFav,
+          onToggleFavorite: () async {
+            await DataRepository().toggleFavorite(stationId);
+          },
+        ),
+      ),
+    );
+    // 返回后重新加载本地缓存和收藏状态
+    if (mounted) {
+      final updatedFavs = await DataRepository().loadFavorites();
+      setState(() {
+        _favorites = updatedFavs;
+      });
+      _loadStationCache();
+    }
+  }
+
+  /// 后端不可用时，用本地历史记录数据构造兜底 data 对象
+  Map<String, dynamic>? _buildFallbackData(String stationId) {
+    final cached = _stationCache[stationId];
+    if (cached == null) return null;
+    return {
+      'station': cached,
+      'distance': 0,
+      'estimated_cost': 0,
+      'wait_time': 0,
+      'insight': '',
+      'estimated_charging_time': 30,
+    };
+  }
+
+  void _showErrorSnackBar(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message), duration: const Duration(seconds: 2)),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
-    final favoriteStations = recommendations.where((rec) {
-      final station = rec['station'];
-      if (station == null) return false;
-      final id = station['station_id']?.toString() ?? station['name']?.toString() ?? '';
-      return favorites.contains(id);
-    }).toList();
+    final favoriteIds = _favorites.toList();
 
     return Scaffold(
       backgroundColor: const Color(0xFFF7F9FC),
@@ -2792,50 +3650,59 @@ class FavoritesListPage extends StatelessWidget {
           icon: const Icon(Icons.arrow_back, color: Colors.black87),
           onPressed: () => Navigator.pop(context),
         ),
-        title: const Text('收藏站点', style: TextStyle(color: Colors.black87, fontWeight: FontWeight.w600)),
+        title: const Text('收藏站点',
+            style:
+                TextStyle(color: Colors.black87, fontWeight: FontWeight.w600)),
       ),
-      body: favoriteStations.isEmpty
+      body: favoriteIds.isEmpty
           ? Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(Icons.star_border, size: 64, color: Colors.grey.shade300),
+                  Icon(Icons.star_border,
+                      size: 64, color: Colors.grey.shade300),
                   const SizedBox(height: 16),
-                  Text('暂无收藏站点', style: TextStyle(fontSize: 16, color: Colors.grey.shade500)),
+                  Text('暂无收藏站点',
+                      style:
+                          TextStyle(fontSize: 16, color: Colors.grey.shade500)),
                   const SizedBox(height: 8),
-                  Text('在电站详情页点击星标收藏', style: TextStyle(fontSize: 13, color: Colors.grey.shade400)),
+                  Text('在电站详情页点击星标收藏',
+                      style:
+                          TextStyle(fontSize: 13, color: Colors.grey.shade400)),
                 ],
               ),
             )
-          : ListView.builder(
+          : Column(
+              children: [
+                // 列表数据加载中指示器
+                if (_isLoadingCache)
+                  const LinearProgressIndicator(minHeight: 2),
+                Expanded(
+                  child: ListView.builder(
               padding: const EdgeInsets.symmetric(vertical: 8),
-              itemCount: favoriteStations.length,
+              itemCount: favoriteIds.length,
               itemBuilder: (context, index) {
-                final rec = favoriteStations[index];
-                final station = rec['station'];
+                final stationId = favoriteIds[index];
+                final cachedStation = _stationCache[stationId];
+                final isLoading = _loadingStationId == stationId;
                 return _FavoriteStationCard(
-                  station: station,
-                  data: rec,
+                  station: cachedStation ?? {'station_id': stationId},
+                  data: cachedStation != null
+                      ? {'station': cachedStation}
+                      : {'station': {'station_id': stationId}},
                   isFavorite: true,
-                  userLat: userLat,
-                  userLng: userLng,
-                  onTap: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => StationDetailScreen(
-                          data: rec,
-                          userLat: userLat,
-                          userLng: userLng,
-                          isFavorite: true,
-                          onToggleFavorite: () {},
-                        ),
-                      ),
-                    );
-                  },
+                  userLat: widget.userLat,
+                  userLng: widget.userLng,
+                  isLoading: isLoading,
+                  onTap: isLoading
+                      ? null
+                      : () => _openStationDetail(stationId),
                 );
               },
             ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -2846,7 +3713,8 @@ class _FavoriteStationCard extends StatelessWidget {
   final bool isFavorite;
   final double userLat;
   final double userLng;
-  final VoidCallback onTap;
+  final VoidCallback? onTap;
+  final bool isLoading;
 
   const _FavoriteStationCard({
     required this.station,
@@ -2854,7 +3722,8 @@ class _FavoriteStationCard extends StatelessWidget {
     required this.isFavorite,
     required this.userLat,
     required this.userLng,
-    required this.onTap,
+    this.onTap,
+    this.isLoading = false,
   });
 
   @override
@@ -2871,61 +3740,79 @@ class _FavoriteStationCard extends StatelessWidget {
         child: InkWell(
           onTap: onTap,
           borderRadius: BorderRadius.circular(16),
-          child: Padding(
-            padding: const EdgeInsets.all(14),
-            child: Row(
-              children: [
-                Container(
-                  width: 52,
-                  height: 52,
-                  decoration: BoxDecoration(
-                    color: _getTypeColor().withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Icon(_getTypeIcon(), color: _getTypeColor(), size: 26),
-                ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        station['name'] ?? '未知站点',
-                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.black87),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
+          child: Stack(
+            children: [
+              Padding(
+                padding: const EdgeInsets.all(14),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 52,
+                      height: 52,
+                      decoration: BoxDecoration(
+                        color: _getTypeColor().withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(12),
                       ),
+                      child: Icon(_getTypeIcon(), color: _getTypeColor(), size: 26),
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            (station['name']?.toString() ?? '').isEmpty
+                                ? (station['station_id'] ?? '未知站点')
+                                : station['name'],
+                            style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 15,
+                                color: Colors.black87),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
                       const SizedBox(height: 6),
                       Wrap(
                         runSpacing: 4,
                         children: [
                           Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 6, vertical: 2),
                             decoration: BoxDecoration(
                               color: _getTypeColor().withOpacity(0.1),
                               borderRadius: BorderRadius.circular(4),
                             ),
                             child: Text(
                               station['type_name'] ?? station['type'] ?? '快充',
-                              style: TextStyle(fontSize: 11, color: _getTypeColor(), fontWeight: FontWeight.w500),
+                              style: TextStyle(
+                                  fontSize: 11,
+                                  color: _getTypeColor(),
+                                  fontWeight: FontWeight.w500),
                             ),
                           ),
                           const SizedBox(width: 8),
                           Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              Icon(Icons.ev_station, size: 14, color: _getAvailColor()),
+                              Icon(Icons.ev_station,
+                                  size: 14, color: _getAvailColor()),
                               const SizedBox(width: 2),
                               Text(
                                 '${_getAvailable()}/${_getTotal()}桩',
-                                style: TextStyle(fontSize: 12, color: _getAvailColor(), fontWeight: FontWeight.w500),
+                                style: TextStyle(
+                                    fontSize: 12,
+                                    color: _getAvailColor(),
+                                    fontWeight: FontWeight.w500),
                               ),
                             ],
                           ),
                           const SizedBox(width: 12),
                           Text(
                             '¥${((station['price'] ?? {})['electricity'] ?? 0).toStringAsFixed(2)}/度',
-                            style: TextStyle(fontSize: 12, color: Colors.orange.shade700, fontWeight: FontWeight.w500),
+                            style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.orange.shade700,
+                                fontWeight: FontWeight.w500),
                           ),
                         ],
                       ),
@@ -2936,47 +3823,196 @@ class _FavoriteStationCard extends StatelessWidget {
               ],
             ),
           ),
-        ),
+          // 加载中遮罩
+          if (isLoading)
+            const Positioned.fill(
+              child: Center(
+                child: SizedBox(
+                  width: 24, height: 24,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+              ),
+            ),
+        ],
       ),
-    );
+    ),
+  ),
+);
   }
 
   IconData _getTypeIcon() {
     switch (station['type']) {
-      case 'ultra': return Icons.bolt;
-      case 'fast': return Icons.flash_on;
-      case 'slow': return Icons.power;
-      case 'destination': return Icons.store;
-      case 'fleet': return Icons.local_shipping;
-      case 'swap': return Icons.swap_horiz;
-      default: return Icons.ev_station;
+      case 'ultra':
+        return Icons.bolt;
+      case 'fast':
+        return Icons.flash_on;
+      case 'slow':
+        return Icons.power;
+      case 'destination':
+        return Icons.store;
+      case 'fleet':
+        return Icons.local_shipping;
+      case 'swap':
+        return Icons.swap_horiz;
+      default:
+        return Icons.ev_station;
     }
   }
 
   Color _getTypeColor() {
     switch (station['type']) {
-      case 'ultra': return Colors.orange;
-      case 'fast': return Colors.blue;
-      case 'slow': return Colors.green;
-      case 'destination': return Colors.purple;
-      case 'fleet': return Colors.teal;
-      case 'swap': return Colors.indigo;
-      default: return Colors.grey;
+      case 'ultra':
+        return Colors.orange;
+      case 'fast':
+        return Colors.blue;
+      case 'slow':
+        return Colors.green;
+      case 'destination':
+        return Colors.purple;
+      case 'fleet':
+        return Colors.teal;
+      case 'swap':
+        return Colors.indigo;
+      default:
+        return Colors.grey;
     }
   }
 
   int _getAvailable() => (station['availability'] ?? {})['available'] ?? 0;
   int _getTotal() => (station['availability'] ?? {})['total'] ?? 0;
-  Color _getAvailColor() => _getAvailable() > 0 ? Colors.green.shade600 : Colors.red;
+  Color _getAvailColor() =>
+      _getAvailable() > 0 ? Colors.green.shade600 : Colors.red;
 }
 
 // ============== 历史记录页面 ==============
-class HistoryListPage extends StatelessWidget {
+class HistoryListPage extends StatefulWidget {
   final List<dynamic> history;
+  final Set<String> favorites;
   final double userLat;
   final double userLng;
 
-  const HistoryListPage({super.key, required this.history, required this.userLat, required this.userLng});
+  const HistoryListPage(
+      {super.key,
+      required this.history,
+      required this.favorites,
+      required this.userLat,
+      required this.userLng});
+
+  @override
+  State<HistoryListPage> createState() => _HistoryListPageState();
+}
+
+class _HistoryListPageState extends State<HistoryListPage> {
+  bool _selectionMode = false;
+  String? _loadingStationId; // 正在加载详情的站点 ID
+  final Set<int> _selected = {};
+
+  void _toggleSelection(int index) {
+    setState(() {
+      if (_selected.contains(index)) {
+        _selected.remove(index);
+      } else {
+        _selected.add(index);
+      }
+    });
+  }
+
+  Future<void> _deleteSelected() async {
+    if (_selected.isEmpty) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('确认删除'),
+        content: Text('确定要删除选中的 ${_selected.length} 条记录吗？'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('取消')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('删除', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    // 从本地删除，按索引从大到小避免偏移
+    final allHistory = await LocalStorage.loadHistory();
+    final sorted = _selected.toList()..sort((a, b) => b.compareTo(a));
+    final isLoggedIn = await AuthService().isLoggedIn();
+
+    for (final i in sorted) {
+      if (i < allHistory.length) {
+        final entry = allHistory[i];
+        final entryId = entry['id'];
+        // 登录用户同步删除云端记录
+        if (isLoggedIn && entryId != null) {
+          try {
+            await ApiClient().delete('/api/history/$entryId');
+          } catch (_) {}
+        }
+        allHistory.removeAt(i);
+      }
+    }
+    await LocalStorage.saveHistory(allHistory);
+
+    // 同步更新父页面持有的 history 引用（widget.history 即 _SleekHomeWrapperState._history）
+    widget.history
+      ..clear()
+      ..addAll(allHistory);
+
+    setState(() {
+      _selected.clear();
+      _selectionMode = false;
+    });
+    // 通知父页面刷新
+    if (mounted) Navigator.pop(context);
+  }
+
+  /// 点击历史记录项：从后端获取最新站点详情，然后导航到详情页
+  Future<void> _openStationDetail(String stationId, Map<String, dynamic> cachedStation) async {
+    setState(() => _loadingStationId = stationId);
+
+    // 从后端获取站点完整数据（含距离计算）
+    final detail = await DataRepository().fetchStationDetail(
+      stationId,
+      lat: widget.userLat,
+      lng: widget.userLng,
+    );
+
+    if (!mounted) return;
+    setState(() => _loadingStationId = null);
+
+    // 后端不可用时，用历史记录中缓存的站点数据兜底
+    final dataToUse = detail ?? {
+      'station': cachedStation,
+      'distance': 0,
+      'estimated_cost': 0,
+      'wait_time': 0,
+      'insight': '',
+      'estimated_charging_time': 30,
+    };
+
+    final isFav = widget.favorites.contains(stationId);
+
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => StationDetailScreen(
+          data: dataToUse,
+          userLat: widget.userLat,
+          userLng: widget.userLng,
+          isFavorite: isFav,
+          onToggleFavorite: () async {
+            await DataRepository().toggleFavorite(stationId);
+          },
+        ),
+      ),
+    );
+    // 返回后刷新页面状态
+    if (mounted) setState(() {});
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -2985,44 +4021,82 @@ class HistoryListPage extends StatelessWidget {
       appBar: AppBar(
         backgroundColor: Colors.white,
         elevation: 0,
-        leading: IconButton(icon: const Icon(Icons.arrow_back, color: Colors.black87), onPressed: () => Navigator.pop(context)),
-        title: const Text('历史记录', style: TextStyle(color: Colors.black87, fontWeight: FontWeight.w600)),
+        leading: IconButton(
+            icon: Icon(_selectionMode ? Icons.close : Icons.arrow_back,
+                color: Colors.black87),
+            onPressed: () {
+              if (_selectionMode) {
+                setState(() {
+                  _selectionMode = false;
+                  _selected.clear();
+                });
+              } else {
+                Navigator.pop(context);
+              }
+            }),
+        title: Text(
+          _selectionMode ? '已选 ${_selected.length} 项' : '历史记录',
+          style: const TextStyle(
+              color: Colors.black87, fontWeight: FontWeight.w600),
+        ),
+        actions: [
+          if (_selectionMode)
+            IconButton(
+              icon: const Icon(Icons.delete, color: Colors.red),
+              onPressed: _selected.isNotEmpty ? _deleteSelected : null,
+              tooltip: '删除选中',
+            )
+          else
+            IconButton(
+              icon: const Icon(Icons.delete_outline, color: Colors.red),
+              onPressed: widget.history.isNotEmpty
+                  ? () => setState(() => _selectionMode = true)
+                  : null,
+              tooltip: '选择删除',
+            ),
+        ],
       ),
-      body: history.isEmpty
+      body: widget.history.isEmpty
           ? Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   Icon(Icons.history, size: 64, color: Colors.grey.shade300),
                   const SizedBox(height: 16),
-                  Text('暂无历史记录', style: TextStyle(fontSize: 16, color: Colors.grey.shade500)),
+                  Text('暂无历史记录',
+                      style:
+                          TextStyle(fontSize: 16, color: Colors.grey.shade500)),
                   const SizedBox(height: 8),
-                  Text('访问电站详情即会自动记录', style: TextStyle(fontSize: 13, color: Colors.grey.shade400)),
+                  Text('访问电站详情即会自动记录',
+                      style:
+                          TextStyle(fontSize: 13, color: Colors.grey.shade400)),
                 ],
               ),
             )
           : ListView.builder(
               padding: const EdgeInsets.symmetric(vertical: 8),
-              itemCount: history.length,
+              itemCount: widget.history.length,
               itemBuilder: (context, index) {
-                final entry = history[index];
+                final entry = widget.history[index];
                 final station = entry['station'] ?? {};
-                final visitedAt = DateTime.tryParse(entry['visited_at'] ?? '') ?? DateTime.now();
+                final visitedAt =
+                    DateTime.tryParse(entry['visited_at'] ?? '') ??
+                        DateTime.now();
+                final isSelected = _selected.contains(index);
+                final stationId = entry['station_id']?.toString() ?? '';
+
                 return _HistoryStationCard(
                   station: station,
                   visitedAt: visitedAt,
+                  isSelected: isSelected,
+                  showCheckbox: _selectionMode,
+                  isLoading: _loadingStationId == stationId,
                   onTap: () {
-                    // 构造一个兼容的 data 对象
-                    final data = {'station': station, 'distance': entry['distance'] ?? 0};
-                    Navigator.push(context, MaterialPageRoute(
-                      builder: (_) => StationDetailScreen(
-                        data: data,
-                        userLat: userLat,
-                        userLng: userLng,
-                        isFavorite: false,
-                        onToggleFavorite: () {},
-                      ),
-                    ));
+                    if (_selectionMode) {
+                      _toggleSelection(index);
+                    } else if (_loadingStationId == null) {
+                      _openStationDetail(stationId, station is Map<String, dynamic> ? station : {});
+                    }
                   },
                 );
               },
@@ -3035,8 +4109,17 @@ class _HistoryStationCard extends StatelessWidget {
   final dynamic station;
   final DateTime visitedAt;
   final VoidCallback onTap;
+  final bool isSelected;
+  final bool showCheckbox;
+  final bool isLoading;
 
-  const _HistoryStationCard({required this.station, required this.visitedAt, required this.onTap});
+  const _HistoryStationCard(
+      {required this.station,
+      required this.visitedAt,
+      required this.onTap,
+      this.isSelected = false,
+      this.showCheckbox = false,
+      this.isLoading = false});
 
   String _formatTime(DateTime dt) {
     final now = DateTime.now();
@@ -3053,42 +4136,79 @@ class _HistoryStationCard extends StatelessWidget {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: isSelected ? Colors.red.shade50 : Colors.white,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.grey.shade200),
+        border: Border.all(
+          color: isSelected ? Colors.red.shade300 : Colors.grey.shade200,
+          width: isSelected ? 1.5 : 1,
+        ),
       ),
       child: Material(
         color: Colors.transparent,
         child: InkWell(
-          onTap: onTap,
+          onTap: isLoading ? null : onTap,
           borderRadius: BorderRadius.circular(16),
-          child: Padding(
-            padding: const EdgeInsets.all(14),
-            child: Row(
-              children: [
-                Container(
-                  width: 48,
-                  height: 48,
-                  decoration: BoxDecoration(
-                    color: _getTypeColor().withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Icon(_getTypeIcon(), color: _getTypeColor(), size: 24),
+          child: Stack(
+            children: [
+              Padding(
+                padding: const EdgeInsets.all(14),
+                child: Row(
+                  children: [
+                    if (showCheckbox)
+                      Padding(
+                        padding: const EdgeInsets.only(right: 12),
+                        child: Icon(
+                          isSelected
+                              ? Icons.check_circle
+                              : Icons.radio_button_unchecked,
+                          color: isSelected ? Colors.red : Colors.grey,
+                          size: 24,
+                        ),
+                      ),
+                    Container(
+                      width: 48,
+                      height: 48,
+                      decoration: BoxDecoration(
+                        color: _getTypeColor().withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Icon(_getTypeIcon(), color: _getTypeColor(), size: 24),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text((station['name']?.toString() ?? '').isEmpty
+                              ? (station['station_id'] ?? '未知站点')
+                              : station['name'],
+                              style: const TextStyle(
+                                  fontWeight: FontWeight.bold, fontSize: 15),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis),
+                          const SizedBox(height: 4),
+                          Text('访问于 ${_formatTime(visitedAt)}',
+                              style: TextStyle(
+                                  fontSize: 12, color: Colors.grey.shade500)),
+                        ],
+                      ),
+                    ),
+                    if (!isLoading)
+                      const Icon(Icons.chevron_right, color: Colors.grey),
+                  ],
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(station['name'] ?? '未知站点', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15), maxLines: 1, overflow: TextOverflow.ellipsis),
-                      const SizedBox(height: 4),
-                      Text('访问于 ${_formatTime(visitedAt)}', style: TextStyle(fontSize: 12, color: Colors.grey.shade500)),
-                    ],
+              ),
+              // 加载中遮罩
+              if (isLoading)
+                const Positioned.fill(
+                  child: Center(
+                    child: SizedBox(
+                      width: 24, height: 24,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
                   ),
                 ),
-                const Icon(Icons.chevron_right, color: Colors.grey),
-              ],
-            ),
+            ],
           ),
         ),
       ),
@@ -3097,25 +4217,39 @@ class _HistoryStationCard extends StatelessWidget {
 
   IconData _getTypeIcon() {
     switch (station['type']) {
-      case 'ultra': return Icons.bolt;
-      case 'fast': return Icons.flash_on;
-      case 'slow': return Icons.power;
-      case 'destination': return Icons.store;
-      case 'fleet': return Icons.local_shipping;
-      case 'swap': return Icons.swap_horiz;
-      default: return Icons.ev_station;
+      case 'ultra':
+        return Icons.bolt;
+      case 'fast':
+        return Icons.flash_on;
+      case 'slow':
+        return Icons.power;
+      case 'destination':
+        return Icons.store;
+      case 'fleet':
+        return Icons.local_shipping;
+      case 'swap':
+        return Icons.swap_horiz;
+      default:
+        return Icons.ev_station;
     }
   }
 
   Color _getTypeColor() {
     switch (station['type']) {
-      case 'ultra': return Colors.orange;
-      case 'fast': return Colors.blue;
-      case 'slow': return Colors.green;
-      case 'destination': return Colors.purple;
-      case 'fleet': return Colors.teal;
-      case 'swap': return Colors.indigo;
-      default: return Colors.grey;
+      case 'ultra':
+        return Colors.orange;
+      case 'fast':
+        return Colors.blue;
+      case 'slow':
+        return Colors.green;
+      case 'destination':
+        return Colors.purple;
+      case 'fleet':
+        return Colors.teal;
+      case 'swap':
+        return Colors.indigo;
+      default:
+        return Colors.grey;
     }
   }
 }
@@ -3127,7 +4261,12 @@ class MyCarPage extends StatefulWidget {
   final double batteryCapacity;
   final double energyConsumption;
 
-  const MyCarPage({super.key, required this.carName, required this.soc, required this.batteryCapacity, required this.energyConsumption});
+  const MyCarPage(
+      {super.key,
+      required this.carName,
+      required this.soc,
+      required this.batteryCapacity,
+      required this.energyConsumption});
 
   @override
   State<MyCarPage> createState() => _MyCarPageState();
@@ -3154,8 +4293,10 @@ class _MyCarPageState extends State<MyCarPage> {
     setState(() {
       _carName = prefs.getString('car_name') ?? widget.carName;
       _soc = prefs.getDouble('soc') ?? widget.soc;
-      _batteryCapacity = prefs.getDouble('battery_capacity') ?? widget.batteryCapacity;
-      _energyConsumption = prefs.getDouble('energy_consumption') ?? widget.energyConsumption;
+      _batteryCapacity =
+          prefs.getDouble('battery_capacity') ?? widget.batteryCapacity;
+      _energyConsumption =
+          prefs.getDouble('energy_consumption') ?? widget.energyConsumption;
     });
   }
 
@@ -3169,16 +4310,28 @@ class _MyCarPageState extends State<MyCarPage> {
 
   @override
   Widget build(BuildContext context) {
-    final range = (_batteryCapacity * (_soc / 100) / _energyConsumption * 100).toInt();
+    final range =
+        (_batteryCapacity * (_soc / 100) / _energyConsumption * 100).toInt();
     return Scaffold(
       backgroundColor: const Color(0xFFF7F9FC),
       appBar: AppBar(
         backgroundColor: Colors.white,
         elevation: 0,
-        leading: IconButton(icon: const Icon(Icons.arrow_back, color: Colors.black87), onPressed: () => Navigator.pop(context)),
-        title: const Text('我的车型', style: TextStyle(color: Colors.black87, fontWeight: FontWeight.w600)),
+        leading: IconButton(
+            icon: const Icon(Icons.arrow_back, color: Colors.black87),
+            onPressed: () => Navigator.pop(context)),
+        title: const Text('我的车型',
+            style:
+                TextStyle(color: Colors.black87, fontWeight: FontWeight.w600)),
         actions: [
-          TextButton(onPressed: () async { await _saveCarData(); if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('保存成功'))); }, child: const Text('保存')),
+          TextButton(
+              onPressed: () async {
+                await _saveCarData();
+                if (mounted)
+                  ScaffoldMessenger.of(context)
+                      .showSnackBar(const SnackBar(content: Text('保存成功')));
+              },
+              child: const Text('保存')),
         ],
       ),
       body: ListView(
@@ -3186,21 +4339,47 @@ class _MyCarPageState extends State<MyCarPage> {
         children: [
           Container(
             padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.06), blurRadius: 12, offset: const Offset(0, 4))]),
+            decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(16),
+                boxShadow: [
+                  BoxShadow(
+                      color: Colors.black.withOpacity(0.06),
+                      blurRadius: 12,
+                      offset: const Offset(0, 4))
+                ]),
             child: Column(
               children: [
-                Icon(Icons.directions_car, size: 48, color: Colors.blue.shade600),
+                Icon(Icons.directions_car,
+                    size: 48, color: Colors.blue.shade600),
                 const SizedBox(height: 12),
-                Text(_carName, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                Text(_carName,
+                    style: const TextStyle(
+                        fontSize: 20, fontWeight: FontWeight.bold)),
                 const SizedBox(height: 4),
-                Text('预估续航 ${range}km', style: TextStyle(fontSize: 14, color: Colors.blue.shade600)),
+                Text('预估续航 ${range}km',
+                    style:
+                        TextStyle(fontSize: 14, color: Colors.blue.shade600)),
               ],
             ),
           ),
           const SizedBox(height: 16),
-          _buildSliderItem('剩余电量', '${_soc.toInt()}%', _soc, 0, 100, (v) => setState(() => _soc = v)),
-          _buildSliderItem('电池容量', '${_batteryCapacity.toInt()} kWh', _batteryCapacity, 40, 120, (v) => setState(() => _batteryCapacity = v)),
-          _buildSliderItem('能耗', '${_energyConsumption.toStringAsFixed(1)} kWh/100km', _energyConsumption, 10, 30, (v) => setState(() => _energyConsumption = v)),
+          _buildSliderItem('剩余电量', '${_soc.toInt()}%', _soc, 0, 100,
+              (v) => setState(() => _soc = v)),
+          _buildSliderItem(
+              '电池容量',
+              '${_batteryCapacity.toInt()} kWh',
+              _batteryCapacity,
+              40,
+              120,
+              (v) => setState(() => _batteryCapacity = v)),
+          _buildSliderItem(
+              '能耗',
+              '${_energyConsumption.toStringAsFixed(1)} kWh/100km',
+              _energyConsumption,
+              10,
+              30,
+              (v) => setState(() => _energyConsumption = v)),
           const SizedBox(height: 16),
           _buildCarSelector(),
         ],
@@ -3208,22 +4387,33 @@ class _MyCarPageState extends State<MyCarPage> {
     );
   }
 
-  Widget _buildSliderItem(String label, String value, double val, double min, double max, ValueChanged<double> onChanged) {
+  Widget _buildSliderItem(String label, String value, double val, double min,
+      double max, ValueChanged<double> onChanged) {
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12)),
+      decoration: BoxDecoration(
+          color: Colors.white, borderRadius: BorderRadius.circular(12)),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(label, style: const TextStyle(fontSize: 14, color: Colors.black87)),
-              Text(value, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Color(0xFF007AFF))),
+              Text(label,
+                  style: const TextStyle(fontSize: 14, color: Colors.black87)),
+              Text(value,
+                  style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFF007AFF))),
             ],
           ),
-          Slider(value: val.clamp(min, max), min: min, max: max, onChanged: onChanged),
+          Slider(
+              value: val.clamp(min, max),
+              min: min,
+              max: max,
+              onChanged: onChanged),
         ],
       ),
     );
@@ -3239,220 +4429,53 @@ class _MyCarPageState extends State<MyCarPage> {
     ];
     return Container(
       padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12)),
+      decoration: BoxDecoration(
+          color: Colors.white, borderRadius: BorderRadius.circular(12)),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('快速选择车型', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+          const Text('快速选择车型',
+              style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
           const SizedBox(height: 12),
-          Wrap(spacing: 8, runSpacing: 8, children: cars.map((car) {
-            final isSelected = _carName == car['name'];
-            return GestureDetector(
-              onTap: () => setState(() {
-                _carName = car['name'] as String;
-                _batteryCapacity = car['capacity'] as double;
-                _energyConsumption = car['consumption'] as double;
-              }),
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                decoration: BoxDecoration(
-                  color: isSelected ? const Color(0xFF007AFF) : Colors.grey.shade100,
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Text(car['name'] as String, style: TextStyle(color: isSelected ? Colors.white : Colors.black87, fontSize: 13)),
-              ),
-            );
-          }).toList()),
+          Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: cars.map((car) {
+                final isSelected = _carName == car['name'];
+                return GestureDetector(
+                  onTap: () => setState(() {
+                    _carName = car['name'] as String;
+                    _batteryCapacity = car['capacity'] as double;
+                    _energyConsumption = car['consumption'] as double;
+                  }),
+                  child: Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: isSelected
+                          ? const Color(0xFF007AFF)
+                          : Colors.grey.shade100,
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text(car['name'] as String,
+                        style: TextStyle(
+                            color: isSelected ? Colors.white : Colors.black87,
+                            fontSize: 13)),
+                  ),
+                );
+              }).toList()),
         ],
       ),
     );
   }
 }
 
-// ============== 常用充电站页面 ==============
-class FrequentStationsPage extends StatelessWidget {
-  final List<dynamic> history;
-  final double userLat;
-  final double userLng;
-
-  const FrequentStationsPage({super.key, required this.history, required this.userLat, required this.userLng});
-
-  @override
-  Widget build(BuildContext context) {
-    // 统计每个电站的访问次数
-    final Map<String, dynamic> stationCount = {};
-    for (final entry in history) {
-      final station = entry['station'] ?? {};
-      final id = station['station_id']?.toString() ?? station['name']?.toString() ?? '';
-      if (id.isEmpty) continue;
-      stationCount[id] = (stationCount[id] ?? 0) + 1;
-    }
-    // 按访问次数排序
-    final sorted = stationCount.entries.toList()..sort((a, b) => (b.value as int).compareTo(a.value as int));
-    final frequentIds = sorted.take(10).map((e) => e.key).toSet();
-
-    final frequentStations = history.where((entry) {
-      final station = entry['station'] ?? {};
-      final id = station['station_id']?.toString() ?? station['name']?.toString() ?? '';
-      return frequentIds.contains(id);
-    }).toList();
-
-    // 去重，保留最新访问的那条
-    final Map<String, dynamic> deduped = {};
-    for (final entry in frequentStations) {
-      final station = entry['station'] ?? {};
-      final id = station['station_id']?.toString() ?? station['name']?.toString() ?? '';
-      deduped[id] = entry;
-    }
-    final uniqueList = deduped.values.toList();
-
-    return Scaffold(
-      backgroundColor: const Color(0xFFF7F9FC),
-      appBar: AppBar(
-        backgroundColor: Colors.white,
-        elevation: 0,
-        leading: IconButton(icon: const Icon(Icons.arrow_back, color: Colors.black87), onPressed: () => Navigator.pop(context)),
-        title: const Text('常用充电站', style: TextStyle(color: Colors.black87, fontWeight: FontWeight.w600)),
-      ),
-      body: uniqueList.isEmpty
-          ? Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.location_on, size: 64, color: Colors.grey.shade300),
-                  const SizedBox(height: 16),
-                  Text('暂无常用充电站', style: TextStyle(fontSize: 16, color: Colors.grey.shade500)),
-                  const SizedBox(height: 8),
-                  Text('访问越多，常用充电站越准确', style: TextStyle(fontSize: 13, color: Colors.grey.shade400)),
-                ],
-              ),
-            )
-          : ListView.builder(
-              padding: const EdgeInsets.symmetric(vertical: 8),
-              itemCount: uniqueList.length,
-              itemBuilder: (context, index) {
-                final entry = uniqueList[index];
-                final station = entry['station'] ?? {};
-                final count = stationCount[station['station_id']?.toString() ?? station['name']?.toString() ?? ''] ?? 1;
-                return _FrequentStationCard(
-                  station: station,
-                  visitCount: count,
-                  onTap: () {
-                    Navigator.push(context, MaterialPageRoute(
-                      builder: (_) => StationDetailScreen(
-                        data: entry,
-                        userLat: userLat,
-                        userLng: userLng,
-                        isFavorite: false,
-                        onToggleFavorite: () {},
-                      ),
-                    ));
-                  },
-                );
-              },
-            ),
-    );
-  }
-}
-
-class _FrequentStationCard extends StatelessWidget {
-  final dynamic station;
-  final int visitCount;
-  final VoidCallback onTap;
-
-  const _FrequentStationCard({required this.station, required this.visitCount, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.grey.shade200),
-      ),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(16),
-          child: Padding(
-            padding: const EdgeInsets.all(14),
-            child: Row(
-              children: [
-                Container(
-                  width: 48,
-                  height: 48,
-                  decoration: BoxDecoration(
-                    color: _getTypeColor().withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Icon(_getTypeIcon(), color: _getTypeColor(), size: 24),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(station['name'] ?? '未知站点', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15), maxLines: 1, overflow: TextOverflow.ellipsis),
-                      const SizedBox(height: 4),
-                      Row(
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: Colors.orange.shade100,
-                              borderRadius: BorderRadius.circular(4),
-                            ),
-                            child: Text('访问 $visitCount 次', style: TextStyle(fontSize: 11, color: Colors.orange.shade700, fontWeight: FontWeight.w500)),
-                          ),
-                          const SizedBox(width: 8),
-                          ...[
-                            if ((station['availability'] ?? {})['available'] > 0)
-                              Text('空闲 ${(station['availability'] ?? {})['available']}', style: TextStyle(fontSize: 12, color: Colors.green.shade600)),
-                          ],
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-                const Icon(Icons.chevron_right, color: Colors.grey),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  IconData _getTypeIcon() {
-    switch (station['type']) {
-      case 'ultra': return Icons.bolt;
-      case 'fast': return Icons.flash_on;
-      case 'slow': return Icons.power;
-      case 'destination': return Icons.store;
-      case 'fleet': return Icons.local_shipping;
-      case 'swap': return Icons.swap_horiz;
-      default: return Icons.ev_station;
-    }
-  }
-
-  Color _getTypeColor() {
-    switch (station['type']) {
-      case 'ultra': return Colors.orange;
-      case 'fast': return Colors.blue;
-      case 'slow': return Colors.green;
-      case 'destination': return Colors.purple;
-      case 'fleet': return Colors.teal;
-      case 'swap': return Colors.indigo;
-      default: return Colors.grey;
-    }
-  }
-}
-
 // ============== 设置页面 ==============
 class SettingsPage extends StatefulWidget {
-  const SettingsPage({super.key});
+  final bool isLoggedIn;
+  final VoidCallback? onLogout;
+
+  const SettingsPage({super.key, this.isLoggedIn = false, this.onLogout});
 
   @override
   State<SettingsPage> createState() => _SettingsPageState();
@@ -3482,6 +4505,28 @@ class _SettingsPageState extends State<SettingsPage> {
     super.dispose();
   }
 
+  Future<void> _logout() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('退出登录'),
+        content: const Text('退出后数据将保留在本地，重新登录后可同步到云端。'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('取消')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('确定退出')),
+        ],
+      ),
+    );
+    if (confirmed == true && widget.onLogout != null) {
+      widget.onLogout!();
+      Navigator.pop(context); // 退出后返回上一页
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -3493,7 +4538,9 @@ class _SettingsPageState extends State<SettingsPage> {
           icon: const Icon(Icons.arrow_back, color: Colors.black87),
           onPressed: () => Navigator.pop(context),
         ),
-        title: const Text('设置', style: TextStyle(color: Colors.black87, fontWeight: FontWeight.w600)),
+        title: const Text('设置',
+            style:
+                TextStyle(color: Colors.black87, fontWeight: FontWeight.w600)),
       ),
       body: ListView(
         padding: const EdgeInsets.all(16),
@@ -3518,7 +4565,11 @@ class _SettingsPageState extends State<SettingsPage> {
                   children: [
                     Icon(Icons.link, color: Color(0xFF007AFF), size: 22),
                     SizedBox(width: 8),
-                    Text('服务器地址', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Colors.black87)),
+                    Text('服务器地址',
+                        style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.black87)),
                   ],
                 ),
                 const SizedBox(height: 16),
@@ -3532,7 +4583,8 @@ class _SettingsPageState extends State<SettingsPage> {
                       borderRadius: BorderRadius.circular(10),
                       borderSide: BorderSide.none,
                     ),
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                    contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 16, vertical: 14),
                   ),
                 ),
                 const SizedBox(height: 12),
@@ -3548,7 +4600,9 @@ class _SettingsPageState extends State<SettingsPage> {
                       Icon(Icons.info_outline, color: Colors.amber, size: 18),
                       SizedBox(width: 8),
                       Expanded(
-                        child: Text('修改后需重启 App 才能生效', style: TextStyle(fontSize: 13, color: Colors.black54)),
+                        child: Text('修改后需重启 App 才能生效',
+                            style:
+                                TextStyle(fontSize: 13, color: Colors.black54)),
                       ),
                     ],
                   ),
@@ -3569,7 +4623,8 @@ class _SettingsPageState extends State<SettingsPage> {
                       backgroundColor: const Color(0xFF007AFF),
                       foregroundColor: Colors.white,
                       padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10)),
                     ),
                     child: Text(_saved ? '已保存，请重启 App' : '保存'),
                   ),
@@ -3577,9 +4632,37 @@ class _SettingsPageState extends State<SettingsPage> {
               ],
             ),
           ),
+          // 退出登录（仅登录用户可见）
+          if (widget.isLoggedIn) ...[
+            const SizedBox(height: 20),
+            _buildListTile(Icons.logout, '退出登录', Colors.red, onTap: _logout),
+          ],
         ],
       ),
     );
   }
-}
 
+  Widget _buildListTile(IconData icon, String title, Color color,
+      {VoidCallback? onTap}) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: ListTile(
+        leading: Container(
+          width: 36,
+          height: 36,
+          decoration: BoxDecoration(
+            color: color.withOpacity(0.1),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Icon(icon, color: color, size: 20),
+        ),
+        title: Text(title, style: TextStyle(fontSize: 15, color: color)),
+        trailing: const Icon(Icons.chevron_right, color: Colors.grey, size: 20),
+        onTap: onTap ?? () {},
+      ),
+    );
+  }
+}

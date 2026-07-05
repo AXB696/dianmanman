@@ -16,12 +16,19 @@ class _UsersPageState extends State<UsersPage> {
   bool _loading = true;
   String _searchUsername = '';
   String _searchPhone = '';
+
+  // 分页
+  static const int _pageSize = 20;
+  int _currentPage = 0;
+
   final _usernameCtrl = TextEditingController();
   final _phoneCtrl = TextEditingController();
 
   // 展开的用户ID
   int? _expandedUserId;
   List<dynamic>? _expandedVehicles;
+
+  int get _totalPages => (_totalUsers / _pageSize).ceil();
 
   @override
   void initState() {
@@ -31,9 +38,11 @@ class _UsersPageState extends State<UsersPage> {
 
   Future<void> _loadUsers() async {
     setState(() => _loading = true);
-    final users = await client.getUsers(
+    final data = await client.getUsers(
       username: _searchUsername,
       phone: _searchPhone,
+      offset: _currentPage * _pageSize,
+      limit: _pageSize,
     );
     final total = await client.getTotalUsers(
       username: _searchUsername,
@@ -41,7 +50,7 @@ class _UsersPageState extends State<UsersPage> {
     );
     if (mounted) {
       setState(() {
-        _users = users ?? [];
+        _users = data?['users'] as List<dynamic>? ?? [];
         _totalUsers = total;
         _loading = false;
         _expandedUserId = null;
@@ -167,6 +176,7 @@ class _UsersPageState extends State<UsersPage> {
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                         ),
                         onPressed: () {
+                          _currentPage = 0;
                           _searchUsername = _usernameCtrl.text;
                           _searchPhone = _phoneCtrl.text;
                           _loadUsers();
@@ -193,6 +203,9 @@ class _UsersPageState extends State<UsersPage> {
                               children: [
                                 _buildUserTable(),
                                 const SizedBox(height: 8),
+                                const SizedBox(height: 16),
+                                _buildPagination(),
+                                const SizedBox(height: 4),
                                 Text(
                                   '共 $_totalUsers 位用户',
                                   style: const TextStyle(color: Colors.grey, fontSize: 13),
@@ -204,6 +217,50 @@ class _UsersPageState extends State<UsersPage> {
                 ),
               ],
             ),
+    );
+  }
+
+  /// 分页导航控件
+  Widget _buildPagination() {
+    if (_totalPages <= 1) return const SizedBox.shrink();
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        IconButton(
+          icon: const Icon(Icons.first_page),
+          onPressed: _currentPage > 0 ? () { setState(() => _currentPage = 0); _loadUsers(); } : null,
+          tooltip: '首页',
+        ),
+        IconButton(
+          icon: const Icon(Icons.chevron_left),
+          onPressed: _currentPage > 0 ? () { setState(() => _currentPage--); _loadUsers(); } : null,
+          tooltip: '上一页',
+        ),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          decoration: BoxDecoration(
+            color: const Color(0xFF007AFF).withOpacity(0.1),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Text(
+            '${_currentPage + 1} / $_totalPages',
+            style: const TextStyle(
+              fontWeight: FontWeight.bold,
+              color: Color(0xFF007AFF),
+            ),
+          ),
+        ),
+        IconButton(
+          icon: const Icon(Icons.chevron_right),
+          onPressed: _currentPage < _totalPages - 1 ? () { setState(() => _currentPage++); _loadUsers(); } : null,
+          tooltip: '下一页',
+        ),
+        IconButton(
+          icon: const Icon(Icons.last_page),
+          onPressed: _currentPage < _totalPages - 1 ? () { setState(() => _currentPage = _totalPages - 1); _loadUsers(); } : null,
+          tooltip: '末页',
+        ),
+      ],
     );
   }
 

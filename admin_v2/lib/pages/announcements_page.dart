@@ -16,6 +16,7 @@ class _AnnouncementsPageState extends State<AnnouncementsPage> {
   bool _loading = true;
   int _page = 0;
   static const int _pageSize = 20;
+  String? _displayDate; // 弹窗截止时间
 
   @override
   void initState() {
@@ -71,6 +72,7 @@ class _AnnouncementsPageState extends State<AnnouncementsPage> {
     final titleCtrl = TextEditingController(text: ann?['title'] ?? '');
     final contentCtrl = TextEditingController(text: ann?['content'] ?? '');
     String status = ann?['status'] ?? 'draft';
+    _displayDate = ann?['display_until'] as String?;
 
     showDialog(
       context: context,
@@ -101,24 +103,74 @@ class _AnnouncementsPageState extends State<AnnouncementsPage> {
                     border: OutlineInputBorder(),
                   ),
                 ),
+                // 弹窗截止日期
                 const SizedBox(height: 12),
-                const Text('状态', style: TextStyle(fontWeight: FontWeight.bold)),
+                const Text('弹窗截止日期（留空不弹窗）',
+                    style: TextStyle(fontWeight: FontWeight.bold)),
+                const SizedBox(height: 8),
+                ElevatedButton.icon(
+                  icon: const Icon(Icons.calendar_today, size: 16),
+                  label: Text(
+                    _displayDate ?? '选择截止日期',
+                    style: TextStyle(
+                        color: _displayDate != null
+                            ? Colors.black87
+                            : Colors.grey),
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.grey.shade100,
+                    foregroundColor: Colors.black87,
+                    elevation: 0,
+                  ),
+                  onPressed: () async {
+                    final picked = await showDatePicker(
+                      context: ctx,
+                      initialDate: DateTime.now().add(const Duration(days: 1)),
+                      firstDate: DateTime.now(),
+                      lastDate: DateTime.now().add(const Duration(days: 365)),
+                    );
+                    if (picked != null) {
+                      final time = await showTimePicker(
+                        context: ctx,
+                        initialTime: const TimeOfDay(hour: 23, minute: 59),
+                      );
+                      if (time != null) {
+                        final dt = DateTime(picked.year, picked.month,
+                            picked.day, time.hour, time.minute);
+                        _displayDate = dt.toIso8601String();
+                        setDialogState(() {});
+                      }
+                    }
+                  },
+                ),
+                if (_displayDate != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Text('截止：$_displayDate',
+                        style: const TextStyle(
+                            fontSize: 11, color: Colors.grey)),
+                  ),
+                const SizedBox(height: 12),
+                const Text('状态',
+                    style: TextStyle(fontWeight: FontWeight.bold)),
                 const SizedBox(height: 8),
                 Row(
                   children: [
                     Radio<String>(
                       value: 'draft',
                       groupValue: status,
-                      onChanged: (v) => setDialogState(() => status = v!),
+                      onChanged: (v) =>
+                          setDialogState(() => status = v!),
                     ),
                     const Text('草稿'),
                     const SizedBox(width: 20),
                     Radio<String>(
                       value: 'published',
                       groupValue: status,
-                      onChanged: (v) => setDialogState(() => status = v!),
+                      onChanged: (v) =>
+                          setDialogState(() => status = v!),
                     ),
-                    const Text('立即发布'),
+                    const Text('已发布'),
                   ],
                 ),
               ],
@@ -144,12 +196,16 @@ class _AnnouncementsPageState extends State<AnnouncementsPage> {
                       'title': titleCtrl.text.trim(),
                       'content': contentCtrl.text.trim(),
                       'status': status,
+                      if (_displayDate != null)
+                        'display_until': _displayDate,
                     });
                   } else {
                     await client.createAnnouncement({
                       'title': titleCtrl.text.trim(),
                       'content': contentCtrl.text.trim(),
                       'status': status,
+                      if (_displayDate != null)
+                        'display_until': _displayDate,
                     });
                   }
                   if (ctx.mounted) Navigator.pop(ctx);
