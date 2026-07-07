@@ -111,13 +111,13 @@ def latest_announcements(
     db: Session = Depends(get_db),
 ):
     """App端获取当前有效的弹窗公告（公开，无需登录）
-    筛选条件：status=published 且 display_until > 当前时间"""
+    筛选条件：status=published 且 (display_until 为空=永久有效 或 display_until > 当前时间)"""
     now = datetime.utcnow()
     items = (
         db.query(Announcement)
         .filter(
             Announcement.status == "published",
-            Announcement.display_until > now,
+            (Announcement.display_until == None) | (Announcement.display_until > now),
         )
         .order_by(Announcement.created_at.desc())
         .limit(5)

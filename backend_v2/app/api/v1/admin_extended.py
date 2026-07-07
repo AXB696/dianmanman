@@ -185,3 +185,106 @@ def get_vehicle_brands(
         })
 
     return {"brands": brands, "total": total}
+
+
+@router.get("/stats/dashboard")
+def get_dashboard_stats(
+    _: UserModel = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    """数据大屏专用统计接口：站点KPI + 实时状态摘要"""
+    from app.repositories.station_repo import station_repo
+
+    # 站点总数和桩总数
+    if station_repo._ready:
+        stations = station_repo._data
+        total_stations = len(stations)
+        total_piles = sum(s.get("pile_count", 0) or 0 for s in stations)
+        available_piles = sum(
+            (s.get("availability") or {}).get("available", 0) or 0
+            for s in stations
+        )
+        busy_stations = sum(
+            1 for s in stations
+            if ((s.get("availability") or {}).get("available", 0) or 0) == 0
+        )
+        online_stations = total_stations - busy_stations
+        online_rate = round(online_stations / total_stations * 100, 1) if total_stations > 0 else 0
+    else:
+        total_stations = 0
+        total_piles = 0
+        available_piles = 0
+        busy_stations = 0
+        online_stations = 0
+        online_rate = 0.0
+
+    # 总充电记录数和总用户数
+    total_charges = db.query(func.count(History.id)).scalar() or 0
+    total_users = db.query(func.count(User.id)).scalar() or 0
+
+    # 今日充电次数
+    from datetime import datetime
+    today = datetime.utcnow().date()
+    today_charges = db.query(func.count(History.id)).filter(
+        func.date(History.visited_at) == today
+    ).scalar() or 0
+
+    return {
+        "total_stations": total_stations,
+        "total_piles": total_piles,
+        "available_piles": available_piles,
+        "busy_stations": busy_stations,
+        "online_stations": online_stations,
+        "online_rate": online_rate,
+        "total_charges": total_charges,
+        "total_users": total_users,
+        "today_charges": today_charges,
+    }
+
+
+@router.get("/stats/station-status")
+def get_station_status(
+    _: UserModel = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    """获取所有站点实时状态（供地图和表格使用）"""
+    from app.repositories.station_repo import station_repo
+
+    if not station_repo._ready:
+        return {"stations": []}
+
+    stations = []
+    for s in station_repo._data:
+        avail = s.get("availability") or {}
+        price_info = s.get("price") or {}
+        loc = s.get("location") or {}
+        stations.append({
+            "station_id": s.get("station_id"),
+            "name": s.get("name"),
+            "district_group": s.get("district_group"),
+            "type": s.get("type"),
+            "type_name": s.get("type_name") or "",
+            "address": s.get("address"),
+            "pile_count": s.get("pile_count"),
+            "power_kw": s.get("power_kw"),
+            "rating": s.get("rating"),
+            "operator": s.get("operator") or "未知",
+            "availability": {
+                "total": avail.get("total", 0),
+                "available": avail.get("available", 0),
+                "occupied": avail.get("occupied", 0),
+            },
+            "price": {
+                "electricity": price_info.get("electricity", 0),
+                "service_fee": price_info.get("service_fee", 0),
+                "total": price_info.get("total", 0),
+                "unit": price_info.get("unit", "元/kWh"),
+            },
+            "location": {
+                "lat": loc.get("lat", 0),
+                "lng": loc.get("lng", 0),
+            },
+            "tel": (s.get("gaode_info") or {}).get("tel") or "",
+        })
+
+    return {"stations": stations}
