@@ -1,7 +1,8 @@
 # 电满满 Docker Compose 配置
 # 使用：docker compose up -d
 # 访问：
-#   - 管理后台：http://你的服务器IP/admin/
+#   - 数据大屏：http://你的服务器IP/dashboard/
+#   - 管理后台：http://你的服务器IP/dashboard/admin/
 #   - API 文档：http://你的服务器IP/docs/
 
 version: "3.8"
