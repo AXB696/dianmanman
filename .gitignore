@@ -6,10 +6,9 @@ __pycache__/
 venv/
 
 # 运行时数据
-*.db
 *.log
 stderr*
-backend_v2/data/
+backend_v2/server.log
 backend_v2/backend_log.txt
 backend_v2/server_log*.txt
 
