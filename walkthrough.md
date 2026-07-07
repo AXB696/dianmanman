@@ -1,157 +1,196 @@
-# Smart Charge — 充电桩路径导航优化系统 项目概览
+# 电满满 Smart Charge v2 — 项目概览
 
-## 📌 项目定位
-
-这是一个**新能源汽车智能充电导航系统**，面向武汉地区，为电动车车主提供最优充电站推荐和路径规划。项目参加**智慧交通创新创业大赛**。
+> 基于 AI 多目标优化的新能源汽车智能充电导航系统。
+> 面向武汉地区，覆盖 982 个充电站，15+ 品牌 60+ 款车型。
+> 参加**智慧交通创新创业大赛**。
 
 ---
 
 ## 🏗️ 整体架构
 
-```mermaid
-graph TB
-    subgraph 前端["📱 前端 (Flutter App)"]
-        A[home_page] --> B[map_page]
-        A --> C[vehicle_select_page]
-        A --> D[preference_page]
-        A --> E[profile_page]
-        B --> F[station_detail_page]
-        A --> G[login_page]
-    end
-
-    subgraph 后端["⚙️ 后端 (FastAPI)"]
-        H[main.py] --> I[road_network.py]
-        H --> J[data_fetch.py]
-        H --> K[stations_data.json]
-    end
-
-    subgraph 外部["🌐 外部服务"]
-        L[高德地图 API]
-        M[OpenStreetMap]
-    end
-
-    前端 -->|HTTP REST| 后端
-    后端 -->|驾车路径| L
-    后端 -->|路网数据| M
+```
+┌─────────────────────────────────────────────────────────────┐
+│  📱 App 端 (Flutter)          🌐 管理后台 (Flutter Web)      │
+│  Android/iOS 用户端            PC 浏览器管理端                │
+│  ├─ 地图 + 推荐卡片           ├─ Dashboard 图表              │
+│  ├─ 收藏 + 历史记录           ├─ 用户管理 + 公告管理          │
+│  └─ 车辆配置 + 导航           └─ 电站总览 + 管理员账号        │
+└──────────────┬──────────────────┬───────────────────────────┘
+               │    HTTP REST     │
+               ▼                  ▼
+┌─────────────────────────────────────────────────────────────┐
+│  ⚙️ 后端 (Python FastAPI + SQLite + JWT)                     │
+│  ├─ 推荐引擎 (多目标加权评分 + 充电曲线模型)                  │
+│  ├─ 三级路径规划 (高德 API → A* OSM → 系数估算)              │
+│  ├─ 用户系统 (注册/登录/JWT/游客模式)                        │
+│  └─ 管理 API (统计/公告/电站管理)                            │
+└──────────────────────────┬──────────────────────────────────┘
+                           │
+┌──────────────────────────▼──────────────────────────────────┐
+│  🌐 外部服务                                                │
+│  高德地图 API (定位/导航/搜索)  ·  OSM 路网 (离线兜底)       │
+│  Open-Meteo API (天气)                                      │
+└─────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 📂 项目结构
+## 📂 项目结构（v2）
 
-| 目录 | 说明 |
-|------|------|
-| [app/smart_charge/](file:///c:/Users/28773/Desktop/Smart%20Charge/app/smart_charge) | Flutter 移动端应用 |
-| [后端/](file:///c:/Users/28773/Desktop/Smart%20Charge/后端) | Python FastAPI 后端服务 |
-| [icon_gen/](file:///c:/Users/28773/Desktop/Smart%20Charge/icon_gen) | Dart 图标生成工具 |
-
----
-
-## ⚙️ 后端 (FastAPI + Python)
-
-### 核心文件
-
-| 文件 | 行数 | 说明 |
-|------|------|------|
-| [main.py](file:///c:/Users/28773/Desktop/Smart%20Charge/后端/main.py) | 905 行 | 主服务：API 接口、推荐算法、充电曲线模型 |
-| [road_network.py](file:///c:/Users/28773/Desktop/Smart%20Charge/后端/road_network.py) | 294 行 | OSM 路网管理：A* 路径规划 |
-| [data_fetch.py](file:///c:/Users/28773/Desktop/Smart%20Charge/后端/data_fetch.py) | ~350 行 | 充电站数据抓取 |
-| [stations_data.json](file:///c:/Users/28773/Desktop/Smart%20Charge/后端/stations_data.json) | ~1.1MB | 武汉地区 982 个充电站数据 |
-
-### 依赖
-
-`FastAPI` + `Uvicorn` + `Pydantic` + `requests` + `osmnx` + `networkx`
-
-### 核心 API 接口
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | `/api/stations` | ⭐ **主接口**：多目标优化推荐充电站 |
-| POST | `/api/recommend` | 个性化推荐（支持用户偏好权重） |
-| GET | `/api/vehicles` | 获取车型品牌列表 |
-| GET | `/api/vehicles/{brand}` | 获取品牌下车型列表 |
-| GET | `/api/vehicle/{brand}/{model}` | 获取车型详细参数 |
-| GET | `/api/station/{station_id}` | 获取充电站详情 |
-| GET | `/api/stats` | 数据统计 |
-
-### 核心算法
-
-#### 1. 三级降级路径规划
-```
-高德地图 API (真实导航) → A* OSM 路网算法 (本地) → 系数估算 (兜底)
-```
-
-#### 2. 多目标加权评分
-- **距离权重** (0.3): 距离越近越好
-- **价格权重** (0.3): 电价 + 服务费越低越好
-- **等待时间权重** (0.2): 排队等待越短越好
-- **充电功率权重** (0.2): 功率越高越好
-- 支持**超充偏好**加成
-
-#### 3. 充电曲线模型
-按 SOC 区间分段模拟充电功率变化，区分**三元锂**和**磷酸铁锂**电池：
-- 10-20% SOC: 100% 峰值功率
-- 70-80% SOC: 38% 功率（明显降速）
-- 90-100% SOC: 15% 功率（涓流）
-
-#### 4. 可达性判断
-基于当前 SOC、电池容量、能耗计算最大行驶里程，保留 **30% 安全余量**。
-
-### 车型数据库
-内置 **15 个品牌、60+ 款**电动车数据（特斯拉、比亚迪、蔚来、小鹏、理想等），包含电池容量、能耗、最大充电功率、电池类型等参数。
+| 目录 | 说明 | 关键文件 |
+|------|------|----------|
+| `app_v2/` | Flutter 移动端 App | `lib/home.dart` (4400+ 行，单文件架构) |
+| `admin_v2/` | Flutter Web 管理后台 | `lib/main.dart` + `lib/pages/` 5 个独立页面 |
+| `backend_v2/` | Python FastAPI 后端 | `app/main.py` + 模块化 API/模型/Schema |
+| `nginx/` | Nginx 反向代理配置 | `nginx.conf` — 转发 `/api/` + 托管 `/admin/` |
+| `icon_gen/` | Dart 图标生成工具 | 生成地图标记图标 |
 
 ---
 
-## 📱 前端 (Flutter App)
+## ⚙️ 后端 (FastAPI + SQLite)
 
-### 技术栈
-- **框架**: Flutter (Dart SDK ^3.5.0)
-- **地图**: 高德地图 Flutter SDK (`amap_flutter_map` 3.0.0)
-- **状态管理**: Provider
-- **网络请求**: Dio
-- **本地存储**: SharedPreferences
-- **权限管理**: PermissionHandler
-
-### 页面结构
-
-| 页面 | 文件 | 说明 |
-|------|------|------|
-| 首页 | [home_page.dart](file:///c:/Users/28773/Desktop/Smart%20Charge/app/smart_charge/lib/pages/home_page.dart) | 充电站列表、筛选入口 |
-| 地图页 | [map_page.dart](file:///c:/Users/28773/Desktop/Smart%20Charge/app/smart_charge/lib/pages/map_page.dart) | 高德地图展示充电站和路径 |
-| 车型选择 | [vehicle_select_page.dart](file:///c:/Users/28773/Desktop/Smart%20Charge/app/smart_charge/lib/pages/vehicle_select_page.dart) | 品牌/车型选择 |
-| 偏好设置 | [preference_page.dart](file:///c:/Users/28773/Desktop/Smart%20Charge/app/smart_charge/lib/pages/preference_page.dart) | 推荐权重调节 |
-| 充电站详情 | [station_detail_page.dart](file:///c:/Users/28773/Desktop/Smart%20Charge/app/smart_charge/lib/pages/station_detail_page.dart) | 充电站详细信息 |
-| 个人中心 | [profile_page.dart](file:///c:/Users/28773/Desktop/Smart%20Charge/app/smart_charge/lib/pages/profile_page.dart) | 用户信息 |
-| 登录 | [login_page.dart](file:///c:/Users/28773/Desktop/Smart%20Charge/app/smart_charge/lib/pages/login_page.dart) | 登录页 |
-
-### 业务层
+### 模块化结构
 
 | 模块 | 说明 |
 |------|------|
-| `services/api_service.dart` | Dio HTTP 封装 |
-| `services/station_service.dart` | 充电站数据服务 |
-| `services/vehicle_service.dart` | 车型数据服务 |
-| `providers/user_provider.dart` | 用户状态管理 (Provider) |
-| `models/station.dart` | 充电站数据模型 |
-| `widgets/station_card.dart` | 充电站卡片组件 |
-| `widgets/filter_sheet.dart` | 筛选面板组件 |
+| `app/api/v1/` | 13 个路由模块 (auth, users, favorites, history, stations, recommend, navigation, admin, announcements 等) |
+| `app/models/` | SQLAlchemy ORM (User, Vehicle, Favorite, History, Announcement) |
+| `app/schemas/` | Pydantic 请求/响应模型 |
+| `app/core/` | 数据库初始化、JWT 安全、权限依赖、配置 |
+| `app/repositories/` | 充电站数据仓库 (982 站 JSON) + 车型数据库 (60+ 款) |
+
+### 核心 API 接口
+
+| 方法 | 路径 | 说明 | 认证 |
+|------|------|------|------|
+| GET | `/api/stations` | 推荐充电站列表 | 公开 |
+| POST | `/api/recommend` | 个性化推荐 (用户偏好) | 可选 JWT |
+| GET | `/api/station/{id}` | 充电站详情 + 距离计算 | 公开 |
+| POST | `/api/auth/register` | 用户注册 | 公开 |
+| POST | `/api/auth/login` | 用户登录 → JWT Token | 公开 |
+| GET/POST | `/api/favorites` | 收藏管理 | JWT |
+| DELETE | `/api/favorites/{station_id}` | 取消收藏 | JWT |
+| GET/POST | `/api/history` | 历史记录 | JWT |
+| DELETE | `/api/history/{id}` | 删除历史 | JWT |
+| GET/POST/PUT/DELETE | `/api/admin/announcements` | 公告 CRUD | Admin |
+| GET | `/api/admin/stats/*` | 统计 API | Admin |
+| GET | `/api/announcements/latest` | 最新公告 | 公开 |
+
+### 核心算法
+
+1. **三级降级路径规划**：高德 API (真实导航) → A* OSM (本地) → 系数估算 (兜底)
+2. **多目标加权评分**：距离 + 价格 + 等待时间 + 充电功率，支持用户自定义权重
+3. **充电曲线模型**：按 SOC 区间分段模拟，区分三元锂/磷酸铁锂电池类型
+4. **可达性判断**：基于 SOC + 电池容量 + 能耗，保留 30% 安全余量
+
+### 认证体系
+
+- **JWT Bearer Token**：Access Token 7 天 + Refresh Token 30 天
+- **角色**：`user` / `admin` / `super_admin`
+- **游客模式**：未登录可用全部功能，数据存本地 SharedPreferences，登录后自动合并
+
+### 数据库
+
+- **SQLite**：零配置、文件即数据库 (`backend_v2/data/smart_charge.db`)
+- **自动迁移**：启动时检测表结构并补全缺失列
+
+---
+
+## 📱 App 端 (Flutter)
+
+### 技术栈
+
+| 技术 | 说明 |
+|------|------|
+| 地图 | 高德 Flutter SDK (`amap_flutter_map` 3.0.0) |
+| 定位 | 高德定位 SDK + Geolocator 双定位 |
+| 网络 | Dio + 自动 Token 刷新拦截器 |
+| 存储 | SharedPreferences (游客本地数据) + 云端同步 (登录后) |
+
+### 数据架构
+
+| 服务层 | 文件 | 说明 |
+|------|------|------|
+| DataRepository | `lib/services/data_repository.dart` | 统一数据仓库，自动切换本地/云端 |
+| LocalStorage | `lib/services/local_storage.dart` | SharedPreferences 封装 |
+| ApiClient | `lib/services/api_client.dart` | Dio HTTP 客户端 + JWT 拦截器 |
+| AuthService | `lib/services/auth_service.dart` | 登录/注册/Token 管理 |
+| VehicleData | `lib/services/vehicle_data.dart` | 内置 60+ 款车型参数 |
+
+### 数据流架构
+
+```
+用户操作
+  ↓
+DataRepository (统一入口)
+  ├─ 游客 → LocalStorage (SharedPreferences)
+  └─ 登录 → ApiClient → 后端 API
+               └─ 同时缓存到 LocalStorage
+
+登录时：本地数据 → 上传云端 → 拉取云端 → 合并（取并集不丢数据）
+登出时：本地 → 同步云端（含删除） → 本地保留
+```
+
+### 页面与功能
+
+| 功能 | 说明 |
+|------|------|
+| 地图首页 | 高德地图 + 底部推荐卡片 PageView，滑动联动地图镜头 |
+| 充电站详情 | 完整信息 + 一键导航 + 收藏切换 + 电话拨打 |
+| 收藏站点 | 独立列表，实时从后端拉取完整站点数据 |
+| 历史记录 | 自动记录访问，支持批量删除，云端同步 |
+| 车辆配置 | 15 品牌 60+ 车型，SOC 滑块调节，实时重新测算 |
+| 天气展示 | 基于用户位置的实时天气 |
+| 用户系统 | 注册/登录/游客模式，JWT 自动续期 |
+
+---
+
+## 🌐 管理后台 (Flutter Web)
+
+| 页面 | 路由 | 说明 |
+|------|------|------|
+| Dashboard | `/` | 4 统计卡片 + 折线图 + 柱状图 + 饼图 + Top10 站点 |
+| 用户管理 | `/users` | 搜索/分页/删除，展开车辆列表 + 充电记录 |
+| 管理员账号 | `/admins` | 仅 super_admin 可见，增删改密码 |
+| 站内公告 | `/announcements` | 公告 CRUD，发布后 App 端自动展示 |
+| 电站总览 | `/stations` | 筛选/搜索/分页/详情弹窗 |
+
+---
+
+## 🐳 部署
+
+| 文件 | 说明 |
+|------|------|
+| `backend_v2/Dockerfile` | Python 3.11 + FastAPI + Uvicorn |
+| `docker-compose.yml` | 后端 + Nginx 一键编排 |
+| `nginx/nginx.conf` | 反向代理 `/api/` + 托管 `/admin/` |
+| `deploy.sh` | 一键部署脚本 (兼容 Ubuntu / Alibaba Cloud Linux) |
+
+```bash
+git clone https://github.com/AXB696/dianmanman.git
+cd dianmanman
+# 编辑 .env 填入 AMAP_KEY
+chmod +x deploy.sh && ./deploy.sh
+```
 
 ---
 
 ## 🗺️ 数据覆盖
 
-- **地域**: 武汉市（汉口、武昌、汉阳三大区域）
-- **充电站**: 982 个（含超充站、快充站、慢充站、目的地充电、专用充电站、换电站）
-- **主要运营商**: 特来电、星星充电等
-- **路网**: 基于 OSM 的武汉核心区域驾车路网
+- **地域**：武汉市 (汉口/武昌/汉阳)
+- **充电站**：982 个 (超充/快充/慢充/目的地/专用/换电)
+- **运营商**：特来电、星星充电等
+- **车型**：特斯拉/比亚迪/蔚来/小鹏/理想/广汽埃安/极氪/吉利/大众/宝马/奔驰/奥迪/通用/小米/华为 问界/其他
 
 ---
 
-## 🔑 关键设计特点
+## 🔄 版本历史
 
-1. **三级路径规划降级** — 保证高可用性
-2. **充电曲线模型** — 精确预估充电时间，区分电池类型
-3. **多目标优化推荐** — 综合距离/价格/等待/功率，支持个性化权重
-4. **可达性安全判断** — 30% 电量安全余量
-5. **批量+精确两阶段计算** — 全量站点简化模式筛选 → TopN 生成完整路径，提升性能
-6. **丰富的车型数据库** — 内置 60+ 款主流电动车参数，自动匹配
+| 版本 | 日期 | 主要变更 |
+|------|------|----------|
+| v1 | 2026-04 | 单文件后端 + Flutter 基础版 |
+| v2 | 2026-07 | 模块化后端 + SQLite + JWT + 管理后台 + Docker 部署 |
+
+---
+
+> 最后更新：2026-07-07
