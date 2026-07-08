@@ -4,8 +4,7 @@
 #  兼容：Ubuntu 22.04 / Alibaba Cloud Linux 4 / CentOS
 #       支持 OpenClaw 等应用镜像
 #  使用方法：
-#    1. 上传项目到服务器 或 AI 助手执行
-#    2. chmod +x deploy.sh && ./deploy.sh
+#    chmod +x deploy.sh && ./deploy.sh
 # ============================================
 set -e
 
@@ -17,6 +16,14 @@ NC='\033[0m'
 echo -e "${GREEN}========================================${NC}"
 echo -e "${GREEN}  电满满 Smart Charge v2  一键部署脚本  ${NC}"
 echo -e "${GREEN}========================================${NC}"
+
+# ── 拉取最新代码 ──
+echo -e "\n${YELLOW}[0/6] 拉取最新代码...${NC}"
+if git rev-parse --git-dir > /dev/null 2>&1; then
+    git pull 2>/dev/null && echo -e "${GREEN}  代码已更新 ✓${NC}" || echo -e "${YELLOW}  git pull 失败（可能无网络或不是 git 仓库），继续部署当前代码${NC}"
+else
+    echo -e "${YELLOW}  非 git 仓库，跳过代码拉取${NC}"
+fi
 
 # 自动检测包管理器（兼容 Ubuntu / Alibaba Cloud Linux / CentOS）
 if command -v apt-get &> /dev/null; then
@@ -32,7 +39,7 @@ fi
 echo -e "${GREEN}检测到包管理器: ${PKG_MGR}${NC}"
 
 # 0. 检查 Docker
-echo -e "\n${YELLOW}[1/5] 检查 Docker 环境...${NC}"
+echo -e "\n${YELLOW}[1/6] 检查 Docker 环境...${NC}"
 if ! command -v docker &> /dev/null; then
     echo -e "${YELLOW}Docker 未安装，正在安装...${NC}"
     curl -fsSL https://get.docker.com | bash
@@ -54,7 +61,7 @@ echo -e "${GREEN}  Docker $(docker --version)${NC}"
 echo -e "${GREEN}  $(docker compose version 2>/dev/null || docker-compose --version)${NC}"
 
 # 2. 生成 JWT 密钥（如果没有设置）
-echo -e "\n${YELLOW}[2/5] 配置环境变量...${NC}"
+echo -e "\n${YELLOW}[2/6] 配置环境变量...${NC}"
 if [ ! -f .env ]; then
     JWT_KEY=$(python3 -c "import secrets; print(secrets.token_hex(32))" 2>/dev/null || openssl rand -hex 32)
     cat > .env <<EOF
@@ -67,19 +74,34 @@ else
 fi
 
 # 3. 检查数据目录
-echo -e "\n${YELLOW}[3/5] 创建数据目录...${NC}"
+echo -e "\n${YELLOW}[3/6] 创建数据目录...${NC}"
 mkdir -p backend_v2/data
 echo -e "${GREEN}  数据目录已就绪 ✓${NC}"
 
 # 4. 构建镜像
-echo -e "\n${YELLOW}[4/5] 构建 Docker 镜像...${NC}"
+echo -e "\n${YELLOW}[4/6] 构建 Docker 镜像...${NC}"
 docker compose build
 echo -e "${GREEN}  镜像构建完成 ✓${NC}"
 
 # 5. 启动服务
-echo -e "\n${YELLOW}[5/5] 启动服务...${NC}"
+echo -e "\n${YELLOW}[5/6] 启动服务...${NC}"
 docker compose up -d
 echo -e "${GREEN}  服务已启动 ✓${NC}"
+
+# 6. 健康检查
+echo -e "\n${YELLOW}[6/6] 等待服务就绪...${NC}"
+for i in 1 2 3 4 5 6 7 8 9 10; do
+    if curl -s http://localhost/health > /dev/null 2>&1; then
+        echo -e "${GREEN}  后端服务就绪 ✓${NC}"
+        break
+    fi
+    sleep 2
+done
+if curl -s http://localhost/dashboard/ > /dev/null 2>&1; then
+    echo -e "${GREEN}  管理后台就绪 ✓${NC}"
+else
+    echo -e "${YELLOW}  管理后台可能还在加载中...${NC}"
+fi
 
 # 检查状态
 echo -e "\n${GREEN}========================================${NC}"
