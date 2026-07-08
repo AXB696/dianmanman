@@ -23,7 +23,9 @@ import 'pages/login_page.dart';
 
 // ============== 全局常量 ==============
 const String AMAP_KEY = "89feee20b4ad911ee8e1effc2a13bfd3";
-const double _OFF_ROUTE_THRESHOLD_METERS = 50.0; // 偏航阈值：50米
+const double _OFF_ROUTE_THRESHOLD_METERS = 50.0; // 偏航阈值：50米（单次检测阈值）
+const int _OFF_ROUTE_DEBOUNCE_COUNT = 3; // 偏航去抖：连续N次超阈值才触发偏航
+const int _GPS_TIMEOUT_SECONDS = 10; // GPS超时：N秒无有效定位后切换降级方案
 const double _ARRIVAL_DISTANCE_METERS = 100.0; // 到达判定距离
 const double _GPS_ACCURACY_THRESHOLD = 25.0; // GPS精度过滤阈值
 const double _ARRIVAL_SPEED_THRESHOLD = 5.0; // 到达时最大速度 km/h
@@ -2196,9 +2198,14 @@ class _NavigationScreenState extends State<NavigationScreen>
   // 地图控制器
   AMapController? _mapController;
 
-  // 位置追踪（高德定位 SDK）
+  // 位置追踪（高德定位 SDK，优先使用）
   AMapFlutterLocation? _aMapLocation;
   StreamSubscription? _positionSubscription;
+  // GPS 降级方案：高德定位超时后切换到 geolocator
+  DateTime? _gpsStartTime; // GPS 启动时间（用于超时检测）
+  bool _usingFallbackGps = false; // 是否已切换到降级 GPS
+  StreamSubscription<Position>? _geolocatorSubscription; // 降级定位流
+  Timer? _gpsTimeoutTimer; // GPS 超时计时器
 
   // 目的地坐标
   double _destLat = 0;
@@ -2206,6 +2213,9 @@ class _NavigationScreenState extends State<NavigationScreen>
 
   // 到达确认计时
   DateTime? _arrivalConfirmStart;
+
+  // 偏航去抖计数器：连续偏航次数，达到 _OFF_ROUTE_DEBOUNCE_COUNT 才触发偏航
+  int _offRouteCount = 0;
 
   // 转向图标映射
   static const Map<String, IconData> _actionIcons = {
@@ -2236,9 +2246,13 @@ class _NavigationScreenState extends State<NavigationScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    // 清理高德定位
     _positionSubscription?.cancel();
     _aMapLocation?.stopLocation();
     _aMapLocation?.destroy();
+    // 清理降级定位
+    _geolocatorSubscription?.cancel();
+    _gpsTimeoutTimer?.cancel();
     super.dispose();
   }
 
@@ -2246,8 +2260,10 @@ class _NavigationScreenState extends State<NavigationScreen>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.paused) {
       _positionSubscription?.pause();
+      _geolocatorSubscription?.pause();
     } else if (state == AppLifecycleState.resumed) {
       _positionSubscription?.resume();
+      _geolocatorSubscription?.resume();
     }
   }
 
@@ -2259,8 +2275,29 @@ class _NavigationScreenState extends State<NavigationScreen>
     _destLng = station['location']?['lng'] ?? 0.0;
   }
 
+  /// 导航定位更新处理（AMap 和 geolocator 共用）
+  /// 提取为独立方法，便于两种定位源复用同一套导航逻辑
+  void _onGpsUpdate(double lat, double lng, double speedMs, double bearing, double accuracy) {
+    if (_isArrived) return;
+
+    setState(() {
+      _userLat = lat;
+      _userLng = lng;
+      _userBearing = bearing;
+      _currentSpeed = speedMs * 3.6; // m/s 转 km/h
+      _gpsAccuracy = accuracy;
+    });
+
+    // 检查偏航
+    _checkDeviation(lat, lng);
+    _updateNavigation(lat, lng, bearing);
+  }
+
   void _startLocationTracking() {
-    // 导航用高德定位，Hight_Accuracy 模式含道路吸附，适合导航
+    // 标记 GPS 启动时间，用于超时检测
+    _gpsStartTime = DateTime.now();
+
+    // 优先使用高德定位，Hight_Accuracy 模式含道路吸附，适合导航
     _aMapLocation = AMapFlutterLocation();
     _aMapLocation!.setLocationOption(AMapLocationOption(
       onceLocation: false,
@@ -2271,8 +2308,6 @@ class _NavigationScreenState extends State<NavigationScreen>
 
     _positionSubscription = _aMapLocation!.onLocationChanged().listen(
       (result) {
-        if (_isArrived) return;
-
         final errCode = result['errorCode']?.toString();
         if (errCode != null && errCode != '0') return;
 
@@ -2288,22 +2323,14 @@ class _NavigationScreenState extends State<NavigationScreen>
         // GPS精度过滤：忽略精度过差的定位
         if (accuracy > _GPS_ACCURACY_THRESHOLD) return;
 
-        final speed =
-            (result['speed'] as num?)?.toDouble() ?? 0;
-        final bearing =
-            (result['bearing'] as num?)?.toDouble() ?? 0;
+        // 成功获取有效位置，取消超时计时器
+        _gpsTimeoutTimer?.cancel();
+        _gpsTimeoutTimer = null;
 
-        setState(() {
-          _userLat = lat;
-          _userLng = lng;
-          _userBearing = bearing;
-          _currentSpeed = speed * 3.6; // m/s 转 km/h
-          _gpsAccuracy = accuracy;
-        });
+        final speed = (result['speed'] as num?)?.toDouble() ?? 0;
+        final bearing = (result['bearing'] as num?)?.toDouble() ?? 0;
 
-        // 检查偏航
-        _checkDeviation(lat, lng);
-        _updateNavigation(lat, lng, bearing);
+        _onGpsUpdate(lat, lng, speed, bearing, accuracy);
       },
       onError: (e) {
         debugPrint('AMap location error: $e');
@@ -2311,6 +2338,56 @@ class _NavigationScreenState extends State<NavigationScreen>
     );
 
     _aMapLocation!.startLocation();
+
+    // 设置超时检测：10秒内无有效位置则切换到 geolocator 降级方案
+    _gpsTimeoutTimer = Timer(const Duration(seconds: _GPS_TIMEOUT_SECONDS), () {
+      if (_usingFallbackGps || _isArrived) return;
+      debugPrint('AMap GPS 超时（${_GPS_TIMEOUT_SECONDS}s），切换到 geolocator 降级方案');
+      _switchToFallbackGps();
+    });
+  }
+
+  /// 切换到 geolocator 降级定位方案
+  /// 当高德定位 SDK 无响应时（权限拒绝/芯片故障/室内无信号），
+  /// 使用系统原生 GPS 保证导航基本功能
+  void _switchToFallbackGps() {
+    if (_usingFallbackGps) return;
+    _usingFallbackGps = true;
+
+    // 停止高德定位以节省电量
+    _positionSubscription?.cancel();
+    _aMapLocation?.stopLocation();
+
+    // 配置 geolocator 高精度定位
+    const locationSettings = LocationSettings(
+      accuracy: LocationAccuracy.bestForNavigation,
+      distanceFilter: 0, // 不做距离过滤，由上层逻辑处理
+    );
+
+    _geolocatorSubscription =
+        Geolocator.getPositionStream(locationSettings: locationSettings).listen(
+      (Position position) {
+        // 过滤无效坐标
+        if (position.latitude.abs() < 0.01 ||
+            position.longitude.abs() < 0.01) return;
+
+        // geolocator 的 accuracy 可能为 0（未知），
+        // 只在有明确精度值时才过滤
+        if (position.accuracy > 0 &&
+            position.accuracy > _GPS_ACCURACY_THRESHOLD) return;
+
+        _onGpsUpdate(
+          position.latitude,
+          position.longitude,
+          position.speed, // m/s
+          position.heading, // 朝向角度
+          position.accuracy > 0 ? position.accuracy : 10.0, // 精度未知时默认10m
+        );
+      },
+      onError: (error) {
+        debugPrint('Geolocator fallback error: $error');
+      },
+    );
   }
 
   void _updateNavigation(double lat, double lng, double bearing) {
@@ -2351,6 +2428,8 @@ class _NavigationScreenState extends State<NavigationScreen>
   }
 
   /// 检查用户是否偏离路线
+  /// 使用去抖机制：连续 _OFF_ROUTE_DEBOUNCE_COUNT 次超阈值才触发偏航，
+  /// 避免 GPS 偶尔漂移导致的误触发
   void _checkDeviation(double lat, double lng) {
     if (_polyline.isEmpty || _isOffRoute) return;
 
@@ -2368,10 +2447,17 @@ class _NavigationScreenState extends State<NavigationScreen>
     // 转换为米
     final distMeters = minDistToRoute * 1000;
     if (distMeters > _OFF_ROUTE_THRESHOLD_METERS) {
-      setState(() {
-        _isOffRoute = true;
-      });
-      _showOffRouteAlert();
+      _offRouteCount++;
+      // 连续 N 次偏航才触发，过滤 GPS 偶发漂移
+      if (_offRouteCount >= _OFF_ROUTE_DEBOUNCE_COUNT) {
+        setState(() {
+          _isOffRoute = true;
+        });
+        _showOffRouteAlert();
+      }
+    } else {
+      // 回到路线上，重置偏航计数
+      _offRouteCount = 0;
     }
   }
 
@@ -2410,6 +2496,7 @@ class _NavigationScreenState extends State<NavigationScreen>
     setState(() {
       _isOffRoute = false;
       _offRouteAlertShown = false;
+      _offRouteCount = 0; // 重置偏航计数器
       _isLoading = true;
     });
     _fetchRoute();
@@ -2468,8 +2555,9 @@ class _NavigationScreenState extends State<NavigationScreen>
         ? _totalDistanceKm * 1000
         : remainingDistMeters;
 
-    // 精确计算当前 step 索引：用 polyline 累计距离匹配 step
-    int stepIndex = _calculateStepIndexByDistance(nearestIdx);
+    // 精确计算当前 step 索引：用用户坐标在 polyline 上的精确投影位置匹配 step
+    int stepIndex = _calculateStepIndexByDistance(nearestIdx,
+        userLat: lat, userLng: lng);
 
     // 计算剩余时间
     double effectiveSpeed = _currentSpeed > 5
@@ -2490,8 +2578,10 @@ class _NavigationScreenState extends State<NavigationScreen>
     };
   }
 
-  /// 根据 polyline 索引精确计算所在路段
-  int _calculateStepIndexByDistance(int nearestPolylineIdx) {
+  /// 根据 polyline 索引和用户位置精确计算所在路段
+  /// [userLat]/[userLng] 用户当前坐标，用于精确计算已行驶距离
+  int _calculateStepIndexByDistance(int nearestPolylineIdx,
+      {double userLat = 0, double userLng = 0}) {
     if (_steps.isEmpty || _polyline.length < 2) return 0;
 
     // 计算用户已行驶的 polyline 距离（公里）
@@ -2504,12 +2594,21 @@ class _NavigationScreenState extends State<NavigationScreen>
         _polyline[i + 1][1],
       );
     }
-    // 加上最近路段的部分距离
-    if (nearestPolylineIdx > 0 && nearestPolylineIdx < _polyline.length) {
-      final p1 = _polyline[nearestPolylineIdx - 1];
-      final p2 = _polyline[nearestPolylineIdx];
-      // 粗略估算：取整段路的 50%
-      traveledDistKm += _calculateDistanceKm(p1[0], p1[1], p2[0], p2[1]) * 0.5;
+    // 当前路段的部分距离：计算用户位置在路段上的精确投影比例
+    if (nearestPolylineIdx < _polyline.length - 1) {
+      final p1 = _polyline[nearestPolylineIdx];
+      final p2 = _polyline[nearestPolylineIdx + 1];
+      final segLenKm = _calculateDistanceKm(p1[0], p1[1], p2[0], p2[1]);
+      if (segLenKm > 0) {
+        // 精确计算投影参数 t（用户位置到线段起点占整段的比例）
+        final dx = p2[0] - p1[0];
+        final dy = p2[1] - p1[1];
+        final t = ((userLat - p1[0]) * dx + (userLng - p1[1]) * dy) /
+            (dx * dx + dy * dy);
+        // clamp 到 [0, 1]，确保不超出路段范围
+        final clampedT = t.clamp(0.0, 1.0);
+        traveledDistKm += segLenKm * clampedT;
+      }
     }
 
     // 遍历 steps，累加 distance_km，找到当前所在 step
@@ -2596,12 +2695,21 @@ class _NavigationScreenState extends State<NavigationScreen>
         final routeData = data['data'];
         setState(() {
           _steps = routeData['steps'] ?? [];
-          _polyline = List<List<double>>.from(
+          // 解析 polyline 并过滤连续重复点（防御性编程，后端已过滤但前端也做一层保护）
+          final rawPolyline = List<List<double>>.from(
             (routeData['polyline'] as List?)?.map(
                   (e) => List<double>.from(e),
                 ) ??
                 [],
           );
+          _polyline = [];
+          for (final pt in rawPolyline) {
+            if (_polyline.isEmpty ||
+                _polyline.last[0] != pt[0] ||
+                _polyline.last[1] != pt[1]) {
+              _polyline.add(pt);
+            }
+          }
           _totalDistanceKm = (routeData['distance_km'] ?? 0).toDouble();
           _totalDurationMin = routeData['duration_min'] ?? 0;
           _remainingDistanceKm = _totalDistanceKm;

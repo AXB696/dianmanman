@@ -107,7 +107,11 @@ class AMapService:
                         for pair in raw.split(";"):
                             parts = pair.split(",")
                             if len(parts) == 2:
-                                polyline_points.append([float(parts[1]), float(parts[0])])
+                                pt = [float(parts[1]), float(parts[0])]
+                                # 过滤连续重复点：高德API有时返回相邻重复坐标，
+                                # 会导致前端偏航检测的距离计算不准确
+                                if not polyline_points or polyline_points[-1] != pt:
+                                    polyline_points.append(pt)
 
                     return {
                         "success": True,
