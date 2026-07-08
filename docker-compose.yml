@@ -39,7 +39,7 @@ services:
       # Nginx 配置文件
       - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
       # 数据大屏 + 管理后台（Vue 3 编译产物，通过 /dashboard/ 访问）
-      - ./Dianmanman-dashboard/dist:/usr/share/nginx/html/dashboard:ro
+      - ./dashboard/dist:/usr/share/nginx/html/dashboard:ro
     depends_on:
       - backend
     networks:
