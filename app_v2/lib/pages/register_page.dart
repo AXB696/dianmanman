@@ -122,10 +122,12 @@ class _RegisterPageState extends State<RegisterPage> {
                         TextFormField(
                           controller: _phoneCtrl,
                           keyboardType: TextInputType.phone,
+                          maxLength: 13,
                           decoration: InputDecoration(
                             labelText: '手机号（选填）',
                             prefixIcon: const Icon(Icons.phone_outlined),
                             border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                            counterText: '',
                           ),
                         ),
                         const SizedBox(height: 14),
