@@ -56,15 +56,22 @@ def _migrate_users_table():
 
 
 def _migrate_history_table():
-    """迁移：为 history 表添加 station_name 列（若不存在）"""
+    """迁移：为 history 表添加新列（若不存在）"""
     from sqlalchemy import text
     try:
         with engine.connect() as conn:
             result = conn.execute(text("PRAGMA table_info(history)"))
             columns = [row[1] for row in result.fetchall()]
-            if "station_name" not in columns:
-                conn.execute(text("ALTER TABLE history ADD COLUMN station_name VARCHAR(200) DEFAULT ''"))
-                conn.commit()
+            migrations = {
+                "station_name": "ALTER TABLE history ADD COLUMN station_name VARCHAR(200) DEFAULT ''",
+                "duration_min": "ALTER TABLE history ADD COLUMN duration_min INTEGER DEFAULT 0",
+                "cost_yuan":   "ALTER TABLE history ADD COLUMN cost_yuan FLOAT DEFAULT 0.0",
+                "energy_kwh":  "ALTER TABLE history ADD COLUMN energy_kwh FLOAT DEFAULT 0.0",
+            }
+            for col, sql in migrations.items():
+                if col not in columns:
+                    conn.execute(text(sql))
+                    conn.commit()
     except Exception:
         pass
 

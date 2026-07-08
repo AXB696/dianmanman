@@ -544,10 +544,23 @@ class _SleekHomeWrapperState extends State<SleekHomeWrapper> {
   Future<void> _addHistory(dynamic data) async {
     final station = data['station'] ?? {};
     final stationId = _getStationId(station);
+
+    // 估算充电数据
+    final priceTotal = (station['price']?['total'] ?? 1.5).toDouble();
+    final powerKw = (station['power_kw'] ?? 60).toDouble();
+    final energyKwh = (_currentSoc > 0)
+        ? ((80 - _currentSoc) / 100 * _batteryCapacity).clamp(0, _batteryCapacity).toDouble()
+        : 20.0;
+    final costYuan = (energyKwh * priceTotal);
+    final durationMin = powerKw > 0 ? (energyKwh / powerKw * 60).round() : 20;
+
     final entry = {
       'station_id': stationId,
       'station': station,
       'visited_at': DateTime.now().toIso8601String(),
+      'duration_min': durationMin,
+      'cost_yuan': costYuan,
+      'energy_kwh': energyKwh,
     };
     await DataRepository().addHistory(entry);
     // 重新加载以保持 UI 同步
@@ -4088,6 +4101,7 @@ class _HistoryListPageState extends State<HistoryListPage> {
                 return _HistoryStationCard(
                   station: station,
                   visitedAt: visitedAt,
+                  entry: entry,
                   isSelected: isSelected,
                   showCheckbox: _selectionMode,
                   isLoading: _loadingStationId == stationId,
@@ -4108,6 +4122,7 @@ class _HistoryListPageState extends State<HistoryListPage> {
 class _HistoryStationCard extends StatelessWidget {
   final dynamic station;
   final DateTime visitedAt;
+  final Map<String, dynamic> entry;
   final VoidCallback onTap;
   final bool isSelected;
   final bool showCheckbox;
@@ -4116,6 +4131,7 @@ class _HistoryStationCard extends StatelessWidget {
   const _HistoryStationCard(
       {required this.station,
       required this.visitedAt,
+      required this.entry,
       required this.onTap,
       this.isSelected = false,
       this.showCheckbox = false,
@@ -4129,6 +4145,17 @@ class _HistoryStationCard extends StatelessWidget {
     if (diff.inHours < 24) return '${diff.inHours}小时前';
     if (diff.inDays < 7) return '${diff.inDays}天前';
     return '${dt.month}/${dt.day}';
+  }
+
+  Widget _statChip(String icon, String text, Color color) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(icon, style: TextStyle(fontSize: 11)),
+        const SizedBox(width: 2),
+        Text(text, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: color)),
+      ],
+    );
   }
 
   @override
@@ -4190,6 +4217,19 @@ class _HistoryStationCard extends StatelessWidget {
                           Text('访问于 ${_formatTime(visitedAt)}',
                               style: TextStyle(
                                   fontSize: 12, color: Colors.grey.shade500)),
+                          // 充电数据
+                          if ((entry['energy_kwh'] ?? 0) > 0) ...[
+                            const SizedBox(height: 6),
+                            Row(
+                              children: [
+                                _statChip('⚡', '${(entry['energy_kwh'] as num).toStringAsFixed(1)}度', const Color(0xFF007AFF)),
+                                const SizedBox(width: 12),
+                                _statChip('💰', '¥${(entry['cost_yuan'] as num).toStringAsFixed(1)}', const Color(0xFFF59E0B)),
+                                const SizedBox(width: 12),
+                                _statChip('⏱', '${entry['duration_min'] ?? 0}分钟', const Color(0xFF10B981)),
+                              ],
+                            ),
+                          ],
                         ],
                       ),
                     ),

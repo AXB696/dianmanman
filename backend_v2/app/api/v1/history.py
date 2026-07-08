@@ -35,6 +35,9 @@ def list_history(
             station_id=h.station_id,
             station_name=h.station_name or "",
             visited_at=h.visited_at.isoformat() if h.visited_at else None,
+            duration_min=h.duration_min or 0,
+            cost_yuan=round(h.cost_yuan or 0, 2),
+            energy_kwh=round(h.energy_kwh or 0, 2),
         )
         for h in history
     ]
@@ -50,6 +53,9 @@ def add_history(
         user_id=current_user.id,
         station_id=req.station_id,
         station_name=req.station_name or "",
+        duration_min=req.duration_min or 0,
+        cost_yuan=req.cost_yuan or 0.0,
+        energy_kwh=req.energy_kwh or 0.0,
     )
     db.add(record)
     db.commit()
@@ -60,6 +66,9 @@ def add_history(
         station_id=record.station_id,
         station_name=record.station_name or "",
         visited_at=record.visited_at.isoformat() if record.visited_at else None,
+        duration_min=record.duration_min or 0,
+        cost_yuan=round(record.cost_yuan or 0, 2),
+        energy_kwh=round(record.energy_kwh or 0, 2),
     )
 
 

@@ -65,7 +65,7 @@ class DataRepository {
     return await LocalStorage.loadHistory();
   }
 
-  /// 添加历史记录（实时同步到云端，含站点名）
+  /// 添加历史记录（实时同步到云端，含站点名和充电数据）
   Future<void> addHistory(Map<String, dynamic> entry) async {
     await LocalStorage.addHistory(entry);
     _loggedIn = await _auth.isLoggedIn();
@@ -78,6 +78,9 @@ class DataRepository {
           await _api.post('/api/history', data: {
             'station_id': stationId,
             'station_name': stationName,
+            'duration_min': entry['duration_min'] ?? 0,
+            'cost_yuan': entry['cost_yuan'] ?? 0.0,
+            'energy_kwh': entry['energy_kwh'] ?? 0.0,
           });
         } catch (_) {}
       }
@@ -290,6 +293,9 @@ class DataRepository {
             await _api.post('/api/history', data: {
               'station_id': stationId,
               'station_name': stationName,
+              'duration_min': entry['duration_min'] ?? 0,
+              'cost_yuan': entry['cost_yuan'] ?? 0.0,
+              'energy_kwh': entry['energy_kwh'] ?? 0.0,
             });
           } catch (_) {
             // 已存在或其他错误，忽略
@@ -375,6 +381,9 @@ class DataRepository {
                 'name': e['station_name']?.toString() ?? '',
               },
               'visited_at': e['visited_at']?.toString() ?? '',
+              'duration_min': e['duration_min'] ?? 0,
+              'cost_yuan': (e['cost_yuan'] ?? 0.0).toDouble(),
+              'energy_kwh': (e['energy_kwh'] ?? 0.0).toDouble(),
             };
           }).toList();
           // 合并云端到本地（去重）
@@ -526,6 +535,9 @@ class DataRepository {
                 await _api.post('/api/history', data: {
                   'station_id': stationId,
                   'station_name': stationName,
+                  'duration_min': entry['duration_min'] ?? 0,
+                  'cost_yuan': entry['cost_yuan'] ?? 0.0,
+                  'energy_kwh': entry['energy_kwh'] ?? 0.0,
                 });
               } catch (_) {}
             }
