@@ -122,13 +122,18 @@ class _RegisterPageState extends State<RegisterPage> {
                         TextFormField(
                           controller: _phoneCtrl,
                           keyboardType: TextInputType.phone,
-                          maxLength: 13,
+                          maxLength: 11,
                           decoration: InputDecoration(
-                            labelText: '手机号（选填）',
+                            labelText: '手机号（选填，11位）',
                             prefixIcon: const Icon(Icons.phone_outlined),
                             border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                             counterText: '',
                           ),
+                          validator: (v) {
+                            if (v == null || v.trim().isEmpty) return null;
+                            if (v.trim().length != 11) return '手机号为11位数字';
+                            return null;
+                          },
                         ),
                         const SizedBox(height: 14),
                         TextFormField(

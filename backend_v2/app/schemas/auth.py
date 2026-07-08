@@ -8,7 +8,7 @@ class RegisterRequest(BaseModel):
     username: str = Field(..., min_length=3, max_length=50)
     password: str = Field(..., min_length=6, max_length=128)
     nickname: str = Field(default="", max_length=100)
-    phone: str = Field(default="", max_length=20)
+    phone: str = Field(default="", max_length=11)  # 中国大陆手机号固定11位
 
 
 class LoginRequest(BaseModel):
