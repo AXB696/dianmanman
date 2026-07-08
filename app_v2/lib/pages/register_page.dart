@@ -16,6 +16,7 @@ class _RegisterPageState extends State<RegisterPage> {
   final _passwordCtrl = TextEditingController();
   final _confirmCtrl = TextEditingController();
   final _nicknameCtrl = TextEditingController();
+  final _phoneCtrl = TextEditingController();
   bool _obscure = true;
   bool _loading = false;
   String? _error;
@@ -28,6 +29,7 @@ class _RegisterPageState extends State<RegisterPage> {
     _passwordCtrl.dispose();
     _confirmCtrl.dispose();
     _nicknameCtrl.dispose();
+    _phoneCtrl.dispose();
     super.dispose();
   }
 
@@ -44,6 +46,7 @@ class _RegisterPageState extends State<RegisterPage> {
         username: _usernameCtrl.text.trim(),
         password: _passwordCtrl.text,
         nickname: _nicknameCtrl.text.trim(),
+        phone: _phoneCtrl.text.trim(),
       );
       if (user != null && mounted) {
         Navigator.pop(context); // 注册成功，关闭注册页
@@ -112,6 +115,16 @@ class _RegisterPageState extends State<RegisterPage> {
                           decoration: InputDecoration(
                             labelText: '昵称（选填）',
                             prefixIcon: const Icon(Icons.badge_outlined),
+                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                          ),
+                        ),
+                        const SizedBox(height: 14),
+                        TextFormField(
+                          controller: _phoneCtrl,
+                          keyboardType: TextInputType.phone,
+                          decoration: InputDecoration(
+                            labelText: '手机号（选填）',
+                            prefixIcon: const Icon(Icons.phone_outlined),
                             border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                           ),
                         ),
