@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:dio/dio.dart';
 import '../services/auth_service.dart';
 import 'register_page.dart';
 
@@ -52,10 +53,33 @@ class _LoginPageState extends State<LoginPage> {
       if (mounted) {
         setState(() {
           _loading = false;
-          _error = '网络错误：${e.toString()}';
+          _error = _getErrorMessage(e);
         });
       }
     }
+  }
+
+  /// 将异常转换为用户可读的中文提示
+  String _getErrorMessage(dynamic e) {
+    if (e is DioException) {
+      switch (e.type) {
+        case DioExceptionType.connectionTimeout:
+        case DioExceptionType.sendTimeout:
+        case DioExceptionType.receiveTimeout:
+          return '网络连接超时，请检查网络后重试';
+        case DioExceptionType.connectionError:
+          return '网络不可用，请检查网络连接';
+        case DioExceptionType.badResponse:
+          final code = e.response?.statusCode;
+          if (code == 401) return '用户名或密码错误';
+          if (code == 422) return '输入格式有误，请检查后重试';
+          if (code != null && code >= 500) return '服务器繁忙，请稍后再试';
+          return '登录失败（${code ?? '未知错误'}）';
+        default:
+          return '网络异常，请稍后再试';
+      }
+    }
+    return '登录失败，请重试';
   }
 
   @override
