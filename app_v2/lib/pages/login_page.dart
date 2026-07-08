@@ -94,16 +94,8 @@ class _LoginPageState extends State<LoginPage> {
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 // Logo
-                Container(
-                  width: 80,
-                  height: 80,
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF007AFF),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: const Icon(Icons.ev_station,
-                      color: Colors.white, size: 44),
-                ),
+                Image.asset('assets/app_icon.png',
+                    width: 80, height: 80),
                 const SizedBox(height: 20),
                 const Text(
                   '电满满',

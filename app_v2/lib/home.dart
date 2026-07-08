@@ -1032,7 +1032,7 @@ class _SleekHomeWrapperState extends State<SleekHomeWrapper> {
         });
   }
 
-  /// 构建当前品牌下的车型选择器（Wrap 布局）
+  /// 构建当前品牌下的车型选择器（Wrap 布局，限定最大高度防止撑破弹窗）
   Widget _buildModelSelector(StateSetter setSheetState) {
     final models = VehicleData.getModels(_currentBrand);
     if (models.isEmpty) {
@@ -1043,30 +1043,34 @@ class _SleekHomeWrapperState extends State<SleekHomeWrapper> {
       );
     }
 
-    return Wrap(
-      spacing: 8,
-      runSpacing: 8,
-      children: models.map((model) {
-        final modelName = model['model'] as String;
-        final isSelected = _currentCar == modelName;
-        return GestureDetector(
-          onTap: () {
-            setSheetState(() {
-              _currentCar = modelName;
-              _batteryCapacity =
-                  (model['battery'] as num).toDouble();
-              _energyConsumption =
-                  (model['consumption'] as num).toDouble();
-            });
-          },
-          child: Container(
-            padding:
-                const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            decoration: BoxDecoration(
-              color: isSelected
-                  ? const Color(0xFF007AFF)
-                  : Colors.grey.shade100,
-              borderRadius: BorderRadius.circular(10),
+    // 五菱等品牌车型较多，限定车型选择区最大高度，超出可滚动
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxHeight: 160),
+      child: SingleChildScrollView(
+        child: Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: models.map((model) {
+            final modelName = model['model'] as String;
+            final isSelected = _currentCar == modelName;
+            return GestureDetector(
+              onTap: () {
+                setSheetState(() {
+                  _currentCar = modelName;
+                  _batteryCapacity =
+                      (model['battery'] as num).toDouble();
+                  _energyConsumption =
+                      (model['consumption'] as num).toDouble();
+                });
+              },
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: isSelected
+                      ? const Color(0xFF007AFF)
+                      : Colors.grey.shade100,
+                  borderRadius: BorderRadius.circular(10),
               border: Border.all(
                 color: isSelected
                     ? const Color(0xFF007AFF)
@@ -1085,6 +1089,8 @@ class _SleekHomeWrapperState extends State<SleekHomeWrapper> {
           ),
         );
       }).toList(),
+        ),
+      ),
     );
   }
 

@@ -128,7 +128,7 @@
 import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { adminLogin, getCurrentUser } from '@/api/auth'
-import logoUrl from '@/assets/logo.svg'
+import logoUrl from '@/assets/app_icon.png'
 
 const emit = defineEmits<{ login: []; selectAdmin: [] }>()
 const router = useRouter()
@@ -242,7 +242,7 @@ function logout() {
 /* 品牌 */
 .brand { margin-bottom: 40px; }
 .brand-icon-wrap { margin-bottom: 20px; }
-.brand-svg { width: 64px; height: 64px; }
+.brand-svg { width: 96px; height: 96px; }
 .brand h1 { font-size: 34px; font-weight: 800; margin: 0 0 6px; letter-spacing: 0.04em; }
 .brand-sub { font-size: 13px; opacity: 0.55; margin: 0; letter-spacing: 0.06em; }
 

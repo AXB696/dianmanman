@@ -1,5 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
-  <background android:drawable="@color/ic_launcher_background"/>
-  <foreground android:drawable="@drawable/ic_launcher_foreground"/>
+    <background android:drawable="@color/ic_launcher_background"/>
+    <!-- 默认插图为25%，此处缩至15%使图标放大至约1.3倍 -->
+    <foreground>
+        <inset
+            android:drawable="@drawable/ic_launcher_foreground"
+            android:inset="15%" />
+    </foreground>
 </adaptive-icon>

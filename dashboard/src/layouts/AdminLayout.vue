@@ -35,7 +35,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import logoUrl from '@/assets/logo.svg'
+import logoUrl from '@/assets/app_icon.png'
 
 const route = useRoute()
 const router = useRouter()
@@ -91,7 +91,7 @@ function handleLogout() {
   padding: 20px; display: flex; align-items: center; gap: 10px;
   border-bottom: 1px solid #f1f5f9;
 }
-.brand-icon { width: 28px; height: 28px; color: #1a56db; }
+.brand-icon { width: 42px; height: 42px; color: #1a56db; }
 .brand-text { font-size: 18px; font-weight: 700; color: #1a1a2e; }
 .sidebar-nav { flex: 1; padding: 12px 8px; display: flex; flex-direction: column; gap: 2px; }
 .nav-item {

@@ -95,6 +95,32 @@ class VehicleRepository:
                 "问界 M5 EV": {"battery": 80, "consumption": 16, "max_charge_power": 120, "battery_type": "三元锂"},
                 "问界 M7": {"battery": 40, "consumption": 18, "max_charge_power": 60, "battery_type": "三元锂"},
             },
+            "五菱": {
+                # 宏光 MINI EV 系列 —— 经典款（无快充，220V/10A家用慢充约2kW）
+                "宏光 MINI EV 轻松款": {"battery": 9.2, "consumption": 7.7, "max_charge_power": 2, "battery_type": "磷酸铁锂"},
+                "宏光 MINI EV 马卡龙": {"battery": 9.2, "consumption": 7.7, "max_charge_power": 2, "battery_type": "磷酸铁锂"},
+                "宏光 MINI EV 马卡龙 长续航": {"battery": 13.4, "consumption": 7.9, "max_charge_power": 2, "battery_type": "磷酸铁锂"},
+                # 宏光 MINI EV GAMEBOY 系列（220V/16A，约3.3kW交流充电，无直流快充）
+                "宏光 MINI EV GAMEBOY 200km": {"battery": 17.3, "consumption": 8.7, "max_charge_power": 3.3, "battery_type": "磷酸铁锂"},
+                "宏光 MINI EV GAMEBOY 300km": {"battery": 26.5, "consumption": 8.8, "max_charge_power": 3.3, "battery_type": "磷酸铁锂"},
+                # 第三代马卡龙（215km版支持约20kW直流快充）
+                "宏光 MINI EV 第三代马卡龙": {"battery": 17.3, "consumption": 8.0, "max_charge_power": 20, "battery_type": "磷酸铁锂"},
+                # 第五代五门版（全系标配约40kW直流快充）
+                "宏光 MINI EV 第五代五门版": {"battery": 16.2, "consumption": 7.9, "max_charge_power": 40, "battery_type": "磷酸铁锂"},
+                # 缤果 系列
+                "缤果 203km": {"battery": 17.3, "consumption": 10, "max_charge_power": 3.3, "battery_type": "磷酸铁锂"},
+                "缤果 333km": {"battery": 31.9, "consumption": 10, "max_charge_power": 3.3, "battery_type": "磷酸铁锂"},
+                "缤果 410km": {"battery": 37.9, "consumption": 10, "max_charge_power": 3.3, "battery_type": "磷酸铁锂"},
+                "缤果 PLUS 510km": {"battery": 50.6, "consumption": 11.4, "max_charge_power": 6.6, "battery_type": "磷酸铁锂"},
+                # Air EV 晴空
+                "Air EV 晴空 两座": {"battery": 26.7, "consumption": 9.5, "max_charge_power": 2, "battery_type": "磷酸铁锂"},
+                "Air EV 晴空 四座": {"battery": 28.4, "consumption": 10.3, "max_charge_power": 40, "battery_type": "磷酸铁锂"},
+                # Nano EV（仅慢充，可选装6.6kW高功率充电机）
+                "Nano EV": {"battery": 28, "consumption": 9.9, "max_charge_power": 6.6, "battery_type": "磷酸铁锂"},
+                # 星光 EV（标配2C快充，同级领先的120kW充电功率）
+                "星光 EV 410km": {"battery": 41.9, "consumption": 11.5, "max_charge_power": 120, "battery_type": "磷酸铁锂"},
+                "星光 EV 510km": {"battery": 54.5, "consumption": 12.5, "max_charge_power": 120, "battery_type": "磷酸铁锂"},
+            },
             "其他": {
                 "默认车型": {"battery": 60, "consumption": 15, "max_charge_power": 120, "battery_type": "三元锂"},
             }

@@ -77,7 +77,7 @@ import ChannelProgress from './components/ChannelProgress.vue'
 import HotRanking from './components/HotRanking.vue'
 import OperatorPanel from './components/OperatorPanel.vue'
 import AdminLogin from './components/AdminLogin.vue'
-import logoUrl from '@/assets/logo.svg'
+import logoUrl from '@/assets/app_icon.png'
 
 // ── 路由集成 ──
 const route = useRoute()
@@ -253,7 +253,7 @@ onUnmounted(() => {
 }
 
 .logo-icon {
-  width: 30px; height: 30px;
+  width: 45px; height: 45px;
   filter: drop-shadow(0 0 8px rgba(0, 212, 255,0.4));
   color: #00d4ff;
 }

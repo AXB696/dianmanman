@@ -62,7 +62,7 @@ class _AuthBootWrapperState extends State<AuthBootWrapper> {
     if (savedUrl != null) {
       await client.init(savedUrl);
     } else {
-      await client.saveServerUrl('https://3aa33e7d.cpolar.io');
+      await client.saveServerUrl('http://39.106.96.59:80');
     }
 
     // 2. 初始化数据仓库（检测登录状态）
