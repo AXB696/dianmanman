@@ -1,0 +1,31 @@
+# ========== 通用 ==========
+*.log
+*.pyc
+*.swp
+.DS_Store
+.env
+
+# ========== Python ==========
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# ========== Node.js / Dashboard ==========
+dashboard/node_modules/
+dashboard/dist/
+
+# ========== Flutter ==========
+app_v2/.dart_tool/
+app_v2/build/
+app_v2/.flutter-plugins
+app_v2/.flutter-plugins-dependencies
+app_v2/.pub-cache/
+app_v2/.pub/
+app_v2/android/app/debug/
+app_v2/android/app/profile/
+app_v2/android/app/release/
+
+# ========== IDE ==========
+.idea/
+.vscode/
+*.iml

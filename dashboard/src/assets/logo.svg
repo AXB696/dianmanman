@@ -1,0 +1,8 @@
+<svg viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- 外圈 -->
+  <circle cx="64" cy="64" r="58" stroke="currentColor" stroke-width="4" opacity="0.3"/>
+  <!-- 闪电 -->
+  <path d="M58 24L36 62h26l-8 42 36-48H66l6-32H58z" fill="currentColor"/>
+  <!-- 中心圆 -->
+  <circle cx="64" cy="64" r="12" stroke="currentColor" stroke-width="3" opacity="0.5"/>
+</svg>
